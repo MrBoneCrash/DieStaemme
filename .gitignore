@@ -1,0 +1,14 @@
+# Lokale Tests und gespeicherte Spielseiten
+/test/
+
+# Lokale Sicherungen und private Konfiguration
+/.local/
+.env
+.env.*
+*.pem
+*.key
+
+# Lokale Abhängigkeiten und Betriebssystemdateien
+node_modules/
+.DS_Store
+Thumbs.db
