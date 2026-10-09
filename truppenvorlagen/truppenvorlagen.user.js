@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Die Stämme – Truppenvorlagen in der Rekrutierung
 // @namespace    local.die-staemme.truppenvorlagen
-// @version      0.3.3
-// @description  Zeigt Soll-/Ist-Abweichungen und füllt Fehlbestände in Einzel- und Massenrekrutierung. Sendet niemals selbst ab. Nutzung auf eigene Gefahr.
+// @version      0.4.1
+// @description  Truppenvorlagen; normale Rekrutierung über Kontrollzentrum, Massenrekrutierung manuell.
 // @author       Lokal
 // @match        https://*.die-staemme.de/game.php?*screen=train*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=train(?:&|#|$))(?!(?:[^#]*&)?mode=(?!(?:train|mass)?(?:&|#|$))[^&#]*(?:&|#|$)))/
 // @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
-// @grant        none
+// @grant        unsafeWindow
+// @noframes
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -16,8 +17,317 @@
 
 (function () {
     'use strict';
+    // CONTROL-CLIENT-BEGIN
+    // Gemeinsamer Baustein; über sync-clients.cjs in eigenständige Userscripts eingebettet.
+    function constructionSurplus(construction) {
+        const fail = reason => ({ known: false, reason, free: null, reserved: null, surplus: 0 });
+        if (!construction?.steps || !construction.buildings) return fail('Bauvorlage oder Gebäudedaten fehlen.');
+        const { buildings, village, steps } = construction;
+        const free = Number(village?.pop_max) - Number(village?.pop);
+        if (!Number.isFinite(free) || village?.pop == null || village?.pop_max == null) return fail('Bauernhofkapazität unbekannt.');
+        const levels = {}, costs = [];
+        for (const [id, building] of Object.entries(buildings)) levels[id] = Number(building.level_next) - 1;
+        let nextFarm = null;
+        for (const step of steps) {
+            const building = buildings[step.building], current = levels[step.building];
+            if (!Number.isInteger(current) || current < 0 || !building) return fail(`Gebäudedaten für ${step.building} fehlen.`);
+            if (current >= step.level) continue;
+            if (step.building === 'farm') { nextFarm = step.level; break; }
+            const pop = Number(building.pop), factor = Number(building.pop_factor);
+            if (building.pop == null || !Number.isFinite(pop) || pop < 0) return fail(`Platzbedarf für ${step.building} unbekannt.`);
+            for (let level = current + 1; level <= step.level; level++) {
+                const offset = level - Number(building.level_next);
+                if (offset > 0 && (!Number.isFinite(factor) || factor < 1)) return fail(`Platzbedarf weiterer ${step.building}-Stufen unbekannt.`);
+                // Native next-level population is rounded. Reserve an upper bound for
+                // later levels instead of releasing possibly needed building slots.
+                costs.push(offset === 0 ? pop : Math.ceil((pop + 1) * Math.pow(factor, offset)));
+            }
+            levels[step.building] = step.level;
+        }
+        const reserved = costs.reduce((sum, cost) => sum + cost, 0);
+        if (!Number.isSafeInteger(reserved)) return fail('Platzbedarf nicht berechenbar.');
+        return { known: true, free, reserved, surplus: Math.max(0, free - reserved), nextFarm };
+    }
+    function recruitmentPlan(items, budget) {
+        const resources = ['wood', 'stone', 'iron', 'pop'], plan = {};
+        if (!budget || resources.some(r => !Number.isFinite(budget[r]) || budget[r] < 0)) return plan;
+        const active = (items || []).filter(item => Number.isSafeInteger(item.deficit) && item.deficit > 0 &&
+            Number.isFinite(item.max) && item.max > 0 && item.cost && resources.every(r => Number.isFinite(item.cost[r]) && item.cost[r] >= 0) && item.cost.pop > 0);
+        let low = 0, high = 1;
+        for (let i = 0; i < 42; i++) {
+            const ratio = (low + high) / 2;
+            const fits = resources.every(r => active.reduce((sum, item) => sum + Math.min(item.max, Math.floor(item.deficit * ratio)) * item.cost[r], 0) <= budget[r]);
+            if (fits) low = ratio; else high = ratio;
+        }
+        const left = { ...budget };
+        for (const item of active) {
+            plan[item.unit] = Math.min(Math.floor(item.max), Math.floor(item.deficit * low));
+            for (const r of resources) left[r] -= plan[item.unit] * item.cost[r];
+        }
+        for (const item of [...active].sort((a, b) => (b.deficit - plan[b.unit]) / b.deficit - (a.deficit - plan[a.unit]) / a.deficit)) {
+            const more = Math.max(0, Math.min(item.deficit - plan[item.unit], Math.floor(item.max) - plan[item.unit],
+                ...resources.filter(r => item.cost[r] > 0).map(r => Math.floor(left[r] / item.cost[r]))));
+            plan[item.unit] += more;
+            for (const r of resources) left[r] -= more * item.cost[r];
+        }
+        return plan;
+    }
+    function activityCheck(doc, win) {
+        function visible(node) {
+            if (!node || node.hidden || !node.isConnected) return false;
+            for (let parent = node; parent; parent = parent.parentElement) {
+                const style = win.getComputedStyle?.(parent);
+                if (style?.display === 'none' || style?.visibility === 'hidden') return false;
+            }
+            return !!node.getClientRects?.().length;
+        }
+        const full = visible(doc.getElementById('popup_box_bot_protection')) ||
+            [...(doc.querySelectorAll?.('iframe[title="hCaptcha-Herausforderung"]') || [])].some(visible);
+        const small = visible(doc.getElementById('botprotection_quest')) ||
+            doc.body?.getAttribute('data-bot-protect') === 'pending';
+        return full ? 'full' : small ? 'small' : null;
+    }
 
-    const VERSION = '0.3.3';
+    function createControlClient(env, name) {
+        const { win, doc, storage, now = Date.now } = env;
+        const listeners = new Set(), requests = new Set();
+        const tab = `${now()}-${Math.random().toString(36).slice(2)}`;
+        let channel, channelKey, lastStatus = 'running', generation = 0, memory = null;
+        const data = () => (typeof unsafeWindow !== 'undefined' ? unsafeWindow : win).game_data;
+        const page = () => typeof unsafeWindow !== 'undefined' ? unsafeWindow : win;
+        const key = () => {
+            const gd = data();
+            return gd?.world && gd?.player?.id ? `ds-control:v1:${win.location?.host || env.host}:${gd.world}:${gd.player.id}` : null;
+        };
+        function read() {
+            try {
+                const raw = key() && storage.getItem(key());
+                const parsed = raw ? JSON.parse(raw) : null;
+                if (parsed && !['running', 'pause'].includes(parsed.status)) throw new Error('Ungültiger Status');
+                if (memory?.status === 'pause') return memory;
+                return parsed || memory || { status: 'running', detectedAt: null };
+            } catch {
+                return memory || { status: 'pause', detectedAt: null, reason: 'Speicher nicht lesbar' };
+            }
+        }
+        function changed() {
+            const state = read();
+            if (state.status !== lastStatus) {
+                lastStatus = state.status;
+                generation++;
+                if (state.status === 'pause') for (const request of requests) request.abort();
+                for (const listener of listeners) {
+                    try { listener(state); } catch (error) { win.console?.error('Kontrollzentrum: Pause-Empfänger', error); }
+                }
+            }
+            return state;
+        }
+        function connect() {
+            const current = key();
+            if (!current || current === channelKey) return;
+            channel?.close(); channelKey = current;
+            try {
+                if (win.BroadcastChannel) {
+                    channel = new win.BroadcastChannel(current);
+                    channel.onmessage = event => {
+                        // Pause-Nachrichten sind auch bei nicht verfügbarem Storage wirksam.
+                        if (event.data?.state?.status === 'pause') memory = event.data.state;
+                        if (event.data?.state?.status === 'running') memory = null;
+                        changed();
+                    };
+                }
+            } catch { /* Storage bleibt als Transport verfügbar. */ }
+        }
+        function write(state) {
+            memory = state;
+            let saved = false;
+            try { if (key()) { storage.setItem(key(), JSON.stringify(state)); saved = true; } } catch { /* Lokal gesperrt bleiben. */ }
+            connect();
+            try { channel?.postMessage({ type: 'state', state, source: name }); } catch { /* Storage-Fallback. */ }
+            changed();
+            return saved;
+        }
+        function pause() {
+            const old = read();
+            if (old.status === 'pause') {
+                // Spieldaten können nach dem ersten DOM-Hinweis eintreffen.
+                try { if (key() && !storage.getItem(key())) write(old); } catch { /* Lokal pausiert bleiben. */ }
+                changed(); return old;
+            }
+            const state = { status: 'pause', detectedAt: now(), reason: 'Aktivitätscheck' };
+            write(state);
+            return state;
+        }
+        function inspect() {
+            connect();
+            const check = activityCheck(doc, win);
+            if (check) {
+                pause();
+                try { if (key()) storage.setItem(`${key()}:check:${tab}`, String(now())); } catch { /* Sperre bleibt lokal aktiv. */ }
+            } else {
+                try { if (key()) storage.removeItem?.(`${key()}:check:${tab}`); } catch { /* Abgelaufene Meldungen werden ignoriert. */ }
+            }
+            changed();
+            return check;
+        }
+        function paused() { inspect(); return read().status === 'pause'; }
+        function assert(expected = generation) {
+            if (paused() || expected !== generation) throw new Error('Kontrollzentrum: Skripte pausiert. Vorgang erneut starten.');
+        }
+        function resume() {
+            if (inspect()) return { ok: false, reason: 'Bitte zuerst den Aktivitätscheck manuell durchführen.' };
+            try {
+                const prefix = `${key()}:check:`;
+                for (let i = 0; i < storage.length; i++) {
+                    const entry = storage.key(i);
+                    if (entry?.startsWith(prefix) && now() - Number(storage.getItem(entry)) < 5000)
+                        return { ok: false, reason: 'In einem anderen Tab ist noch ein Aktivitätscheck geöffnet.' };
+                }
+            } catch { return { ok: false, reason: 'Browserspeicher nicht verfügbar. Pause kann nicht sicher aufgehoben werden.' }; }
+            const previous = read();
+            const state = { ...previous, status: 'running', resumedAt: now() };
+            if (!write(state)) {
+                write(previous);
+                return { ok: false, reason: 'Pause konnte nicht dauerhaft aufgehoben werden.' };
+            }
+            return { ok: true };
+        }
+        async function request(url, options = {}) {
+            assert();
+            const expected = generation, controller = new win.AbortController();
+            requests.add(controller);
+            const abort = () => controller.abort();
+            const cleanup = () => {
+                requests.delete(controller);
+                options.signal?.removeEventListener('abort', abort);
+            };
+            controller.signal.addEventListener('abort', cleanup, { once: true });
+            if (options.signal?.aborted) abort();
+            options.signal?.addEventListener('abort', abort, { once: true });
+            // Auch das Lesen des Antwortkörpers wird beim Pausieren abgebrochen.
+            try {
+                const response = await win.fetch(url, { ...options, signal: controller.signal });
+                assert(expected);
+                for (const method of ['text', 'json', 'blob', 'arrayBuffer', 'formData', 'bytes']) {
+                    if (typeof response[method] !== 'function') continue;
+                    const original = response[method].bind(response);
+                    response[method] = async (...args) => {
+                        try { const body = await original(...args); assert(expected); return body; }
+                        finally { cleanup(); }
+                    };
+                }
+                return response;
+            } catch (error) { cleanup(); throw error; }
+        }
+        const knownScripts = ['konstruktionshelfer', 'raubzug-helfer', 'truppenvorlagen'];
+        const scriptKey = (id, villageId = data()?.village?.id) => `${key()}:script:${id}:${villageId}`;
+        const commandKey = (id, villageId) => `${scriptKey(id, villageId)}:auto`;
+        function scriptState(id, refresh = false, villageId = data()?.village?.id) {
+            if (!knownScripts.includes(id) || !key()) return null;
+            const provider = page().DSControlParticipants?.[id];
+            const scope = scriptKey(id, villageId);
+            if (refresh && provider?.scope === scope) provider.publish();
+            try {
+                const state = JSON.parse(storage.getItem(scope) || 'null');
+                // On another game view, use the helper's saved browser-clock check time.
+                // An outstanding on/off command has priority until the helper consumes it.
+                if (state?.auto && id === 'raubzug-helfer' && !storage.getItem(commandKey(id, villageId)) && provider?.scope !== scope) {
+                    const gd = data();
+                    const schedule = JSON.parse(storage.getItem(`ds-raubzug-helfer:${gd.world}:${gd.player.id}:${villageId}:schedule`) || 'null');
+                    if (schedule && Object.hasOwn(schedule, 'wakeAt')) state.nextAt = Number.isFinite(schedule.wakeAt) ? schedule.wakeAt : null;
+                }
+                return state?.installed ? { ...state, villageId: String(villageId), live: provider?.scope === scope } : null;
+            } catch { return null; }
+        }
+        function scriptVillages(id) {
+            if (!knownScripts.includes(id) || !key()) return [];
+            const prefix = `${key()}:script:${id}:`, villageIds = [];
+            try {
+                for (let index = 0; index < storage.length; index++) {
+                    const itemKey = storage.key(index);
+                    if (itemKey?.startsWith(prefix) && /^\d+$/.test(itemKey.slice(prefix.length))) villageIds.push(itemKey.slice(prefix.length));
+                }
+            } catch { return []; }
+            return villageIds.map(villageId => scriptState(id, true, villageId)).filter(Boolean);
+        }
+        function registerScript(id, api) {
+            if (!knownScripts.includes(id) || !key()) throw new Error('Unbekannter Helfer oder fehlende Spieldaten.');
+            const scope = scriptKey(id);
+            function publish() {
+                const state = api.state();
+                const record = { installed: true, auto: !!state.auto, busy: !!state.busy,
+                    status: String(state.status || ''), nextAt: Number.isFinite(state.nextAt) ? state.nextAt : null,
+                    completedAt: Number.isFinite(state.completedAt) ? state.completedAt : 0,
+                    construction: state.construction || null, recruitment: state.recruitment || null,
+                    version: api.version, detectedAt: now(), villageId: String(data().village?.id),
+                    villageName: String(data().village?.name || ''),
+                    villageCoords: data().village?.x != null && data().village?.y != null ? `${data().village.x}|${data().village.y}` : '' };
+                try {
+                    const old = JSON.parse(storage.getItem(scope) || 'null');
+                    if (old) record.detectedAt = old.detectedAt;
+                    const value = JSON.stringify(record);
+                    if (storage.getItem(scope) !== value) storage.setItem(scope, value);
+                } catch { /* Helfer kann weiter lokal bedient werden. */ }
+                return record;
+            }
+            function consume() {
+                if (scriptKey(id) !== scope) return;
+                try {
+                    const raw = storage.getItem(commandKey(id));
+                    if (!raw) return;
+                    const command = JSON.parse(raw);
+                    if (typeof command.enabled !== 'boolean') return;
+                    storage.removeItem(commandKey(id));
+                    api.setAuto(command.enabled);
+                    publish();
+                } catch (error) { win.console?.error('Kontrollzentrum: Automatiksteuerung', error); }
+            }
+            const provider = { scope, publish, consume };
+            (page().DSControlParticipants ||= {})[id] = provider;
+            consume(); publish();
+            win.addEventListener?.('storage', event => { if (event.key === commandKey(id)) consume(); });
+            win.addEventListener?.('pagehide', () => {
+                if (page().DSControlParticipants?.[id] === provider) delete page().DSControlParticipants[id];
+            });
+            return provider;
+        }
+        function setScriptAuto(id, enabled, villageId = data()?.village?.id) {
+            const state = scriptState(id, false, villageId);
+            if (!state || typeof enabled !== 'boolean') return false;
+            try {
+                storage.setItem(commandKey(id, villageId), JSON.stringify({ enabled, issuedAt: now() }));
+                const provider = page().DSControlParticipants?.[id];
+                if (provider?.scope === scriptKey(id, villageId)) provider.consume();
+                else if (storage.getItem(commandKey(id, villageId))) storage.setItem(scriptKey(id, villageId), JSON.stringify({ ...state, live: undefined, auto: enabled,
+                    busy: false, nextAt: enabled && id === 'raubzug-helfer' ? state.nextAt || now() : null }));
+                return true;
+            } catch { return false; }
+        }
+        win.addEventListener?.('storage', event => {
+            if (event.key === key()) { memory = null; changed(); }
+        });
+        win.addEventListener?.('pagehide', () => {
+            try { if (key()) storage.removeItem(`${key()}:check:${tab}`); } catch { /* Optional. */ }
+            channel?.close();
+            for (const request of requests) request.abort();
+        });
+        connect(); changed();
+        return { inspect, paused, assert, resume, state: read, fetch: request,
+            registerScript, scriptState, scriptVillages, setScriptAuto,
+            forgetScript(id, villageId) { if (knownScripts.includes(id)) storage.removeItem(scriptKey(id, villageId)); },
+            scope: key,
+            token() { assert(); return generation; },
+            onChange(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+            track(handle) { if (handle?.abort) requests.add(handle); return () => requests.delete(handle); },
+            click(element) { assert(); element.click(); },
+            interval(callback, delay, ...args) {
+                return (win.setInterval || env.setInterval)(() => { if (!paused()) callback(...args); }, delay);
+            }
+        };
+    }
+    // CONTROL-CLIENT-END
+
+    const VERSION = '0.4.1';
     const SCRIPT_ID = 'ds-troop-templates';
     const STORAGE_VERSION = 1;
     const STORAGE_PREFIX = 'ds-troop-templates';
@@ -244,13 +554,16 @@
         return;
     }
 
-    const gameData = window.game_data || {};
+    const gamePage = typeof unsafeWindow === 'undefined' ? window : unsafeWindow;
+    const gameData = gamePage.game_data || {};
     const search = new URLSearchParams(window.location.search);
     const mode = search.get('mode') || gameData.mode || 'train';
 
     if (!['train', 'mass'].includes(mode)) {
         return;
     }
+    if (window.top !== window.self) return;
+    const dsControl = mode === 'train' ? createControlClient({ win: window, doc: document, storage: window.localStorage }, 'Truppenvorlagen') : null;
 
     if (document.getElementById(`${SCRIPT_ID}-panel`)) {
         return;
@@ -309,11 +622,157 @@
     renderAllContexts();
     startIntegrationObserver();
 
-    window.DSTroopTemplates = Object.freeze({
+    gamePage.DSTroopTemplates = Object.freeze({
         version: VERSION,
         refresh: () => refreshIntegration(true),
         calculatePlan
     });
+    if (mode === 'train') integrateRecruitment();
+
+    function integrateRecruitment() {
+        const villageId = String(gameData.village.id), scope = dsControl.scope();
+        const autoKey = `${scope}:recruit-auto:${villageId}`, commandKey = `${scope}:recruit-command:${villageId}`;
+        let activeCommand = null, revision = 0, participant;
+        const enabled = () => window.localStorage.getItem(autoKey) !== 'false';
+        function snapshot() {
+            const context = state.contexts[0], form = document.querySelector('#train_form');
+            const stored = loadStore(), templateId = stored.villageTemplateIds[villageId];
+            const template = stored.templates.find(t => t.id === templateId);
+            if (!form || !context || !template) return null;
+            const entries = collectSingleEntries(form, readQueuedCounts(document).counts, false);
+            const items = [...entries.values()].map(e => ({ unit: e.unit, total: e.total, queued: e.queued, max: Number.isFinite(e.max) ? e.max : null,
+                cost: e.cost, deficit: e.total === null ? 0 : Math.max(0, (template.units[e.unit] || 0) - e.total - e.queued),
+                disabled: e.input.disabled || e.input.readOnly }));
+            const budget = readAvailableBudget(document, gamePage.game_data);
+            const nativeNumber = id => {
+                const text = document.getElementById(id)?.textContent?.replace(/[.\s\u00a0]/g, '');
+                return /^\d+$/.test(text || '') ? Number(text) : null;
+            };
+            if (budget) {
+                for (const r of ['wood', 'stone', 'iron']) { const current = nativeNumber(r); if (current !== null) budget[r] = Math.min(budget[r], current); }
+                const pop = nativeNumber('pop_current_label'), max = nativeNumber('pop_max_label');
+                if (pop !== null && max !== null) budget.pop = Math.min(budget.pop, Math.max(0, max - pop));
+            }
+            return { templateId, targets: template.units, items,
+                budget, at: Date.now() };
+        }
+        function readCommand() { try { return JSON.parse(window.localStorage.getItem(commandKey) || 'null'); } catch { return null; } }
+        function saveCommand(command) { window.localStorage.setItem(commandKey, JSON.stringify(command)); }
+        function finish(command, status, message) {
+            saveCommand({ ...command, status, message, completedAt: Date.now() });
+            notify(message, status !== 'confirmed'); participant?.publish();
+        }
+        const wait = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+        async function process() {
+            if (activeCommand || dsControl.paused()) return;
+            if (!window.navigator.locks?.request) {
+                const command = readCommand();
+                if (command?.status === 'queued') finish(command, 'failed', 'Browser unterstützt keine sichere Tab-Sperre.');
+                return;
+            }
+            await window.navigator.locks.request(commandKey, { ifAvailable: true }, async lock => { if (lock) await execute(); });
+        }
+        async function execute() {
+            const command = readCommand();
+            if (!command || activeCommand || !['queued', 'processing', 'submitted'].includes(command.status) || dsControl.paused()) return;
+            if (['action', 'try', 'ajax', 'ajaxaction'].some(k => search.has(k))) return;
+            if (command.villageId !== villageId || command.scope !== scope || command.issuedAt > Date.now() || Date.now() - command.issuedAt > 600000) {
+                finish(command, 'failed', 'Rekrutierungsbefehl ungültig oder abgelaufen.'); return;
+            }
+            if (command.status === 'processing') { finish(command, 'failed', 'Unterbrochener Auftrag wird nicht erneut abgeschickt.'); return; }
+            activeCommand = command.id; const started = revision;
+            try {
+                if (command.status === 'queued') {
+                    if (!enabled()) throw new Error('Rekrutierungsautomatik ausgeschaltet.');
+                    saveCommand({ ...command, status: 'processing' });
+                    const token = dsControl.token();
+                    await wait(1000 + Math.floor(Math.random() * 3001));
+                    dsControl.assert(token);
+                    if (started !== revision || !enabled()) throw new Error('Rekrutierung durch Pause oder Automatikänderung angehalten.');
+                    refreshIntegration(true);
+                    const live = snapshot();
+                    if (!live?.budget || live.templateId !== command.templateId || JSON.stringify(live.targets) !== command.targetsSignature)
+                        throw new Error('Truppenvorlage oder Bestandsdaten geändert.');
+                    if (!Number.isSafeInteger(command.reservedPop) || command.reservedPop < 0 || !Number.isSafeInteger(command.surplus) || command.surplus <= 0) throw new Error('Baureserve oder Überschuss fehlt.');
+                    const budget = { ...live.budget, pop: Math.max(0, Math.min(command.surplus, live.budget.pop - command.reservedPop)) };
+                    const validItems = live.items.filter(item => !item.disabled);
+                    if (gamePage.DSControlCenter?.planRecruitmentNow) command.units = gamePage.DSControlCenter.planRecruitmentNow(villageId, { ...live, items: validItems }, command.id);
+                    const requested = validItems.filter(item => item.cost && Number.isFinite(item.max)).map(item => ({ ...item,
+                        deficit: Math.min(item.deficit, Number.isSafeInteger(command.units[item.unit]) && command.units[item.unit] > 0 ? command.units[item.unit] : 0) }));
+                    const units = calculatePlan(requested, true, budget);
+                    if (!Object.values(units).some(n => n > 0)) { finish(command, 'confirmed', 'Keine neuen Einheiten nötig oder innerhalb der Baureserve finanzierbar.'); return; }
+                    const form = document.querySelector('#train_form');
+                    const submit = form?.querySelector('input[type="submit"], button[type="submit"], button:not([type])');
+                    if (!submit || submit.disabled || !isVisible(submit)) throw new Error('Rekrutieren-Button nicht verfügbar.');
+                    const entries = collectSingleEntries(form, readQueuedCounts(document).counts, false);
+                    if ([...entries.values()].some(e => Number(e.input.value) > 0)) throw new Error('Rekrutierungsfelder sind bereits manuell belegt.');
+                    dsControl.assert(token);
+                    for (const entry of entries.values()) if (!entry.input.disabled && !entry.input.readOnly) setRecruitValue(entry.input, units[entry.unit] || 0);
+                    await wait(1000 + Math.floor(Math.random() * 3001));
+                    dsControl.assert(token);
+                    if (started !== revision || !enabled()) throw new Error('Rekrutierung vor dem Abschicken angehalten.');
+                    if ([...entries.values()].some(entry => !entry.input.isConnected || Number(entry.input.value || 0) !== (units[entry.unit] || 0)))
+                        throw new Error('Rekrutierungsfelder vor dem Abschicken geändert.');
+                    // Native maxima (and cost previews) may already subtract the entered order.
+                    // Read an unallocated snapshot synchronously, then restore the same inputs.
+                    // Real resource losses, queue changes and native limits remain visible.
+                    let refreshed;
+                    const entered = [...entries.values()].map(entry => [entry.input, entry.input.value]);
+                    try {
+                        for (const [input] of entered) if (!input.disabled && !input.readOnly) setRecruitValue(input, 0);
+                        refreshed = snapshot();
+                    } finally {
+                        for (const [input, value] of entered) {
+                            input.value = value;
+                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                    if (!refreshed?.budget || refreshed.templateId !== command.templateId || JSON.stringify(refreshed.targets) !== command.targetsSignature)
+                        throw new Error('Vorlage vor dem Abschicken geändert.');
+                    const finalBudget = { ...refreshed.budget, pop: Math.max(0, Math.min(command.surplus, refreshed.budget.pop - command.reservedPop)) };
+                    const finalItems = refreshed.items.filter(item => (units[item.unit] || 0) > 0);
+                    if (!finalItems.length || finalItems.some(item => item.disabled || !item.cost || item.deficit < units[item.unit] || !Number.isFinite(item.max) || item.max < units[item.unit]))
+                        throw new Error('Truppenbestände oder Rekrutierungsgrenzen vor dem Abschicken geändert.');
+                    if (!['wood', 'stone', 'iron', 'pop'].every(r => finalItems.reduce((sum, item) => sum + units[item.unit] * item.cost[r], 0) <= finalBudget[r]))
+                        throw new Error('Rohstoffe oder freie Bauernhofkapazität vor dem Abschicken nicht mehr ausreichend.');
+                    if ([...entries.values()].some(entry => !entry.input.isConnected || Number(entry.input.value || 0) !== (units[entry.unit] || 0)))
+                        throw new Error('Rekrutierungsfelder vor dem Abschicken geändert.');
+                    if (!submit.isConnected || submit.disabled || !isVisible(submit)) throw new Error('Rekrutieren-Button vor dem Abschicken geändert.');
+                    command.units = units; command.baselineQueued = Object.fromEntries(live.items.map(i => [i.unit, i.queued]));
+                    command.baselinePop = Number(gamePage.game_data.village.pop);
+                    command.spentPop = requested.reduce((sum, item) => sum + (units[item.unit] || 0) * item.cost.pop, 0);
+                    command.status = 'submitted'; command.submittedAt = Date.now();
+                    saveCommand(command); // Persist before native submit; never repeat after navigation.
+                    dsControl.click(submit);
+                }
+                for (let i = 0; i < 60; i++) {
+                    dsControl.assert();
+                    const queued = readQueuedCounts(document).counts;
+                    if (Object.entries(command.units).filter(([, n]) => n > 0).every(([unit, n]) => (queued[unit] || 0) >= (command.baselineQueued[unit] || 0) + n) ||
+                        Number(gamePage.game_data?.village?.pop) >= command.baselinePop + command.spentPop) {
+                        finish(command, 'confirmed', 'Rekrutierungsauftrag vom Spiel bestätigt.'); return;
+                    }
+                    await wait(250);
+                }
+                finish(command, 'unknown', 'Spielbestätigung fehlt. Auftrag wird nicht wiederholt.');
+            } catch (error) {
+                finish(command, command.status === 'submitted' ? 'unknown' : 'failed', error.message);
+            } finally { activeCommand = null; participant?.publish(); }
+        }
+        participant = dsControl.registerScript('truppenvorlagen', {
+            version: VERSION, state: () => {
+                const command = readCommand(), recruitment = snapshot();
+                return { auto: enabled() && !!recruitment, busy: !!activeCommand, completedAt: command?.completedAt || 0,
+                    recruitment, status: command?.message || 'Bereit für normale Rekrutierung.' };
+            },
+            setAuto(value) { revision++; window.localStorage.setItem(autoKey, String(value)); }
+        });
+        dsControl.onChange(() => { revision++; if (!dsControl.paused()) void process(); });
+        const timer = window.setInterval(() => { participant.publish(); void process(); }, 1000);
+        window.addEventListener('pagehide', () => { revision++; window.clearInterval(timer); });
+        void process();
+    }
 
     function discoverScreen() {
         if (mode === 'train') {
@@ -339,12 +798,12 @@
         if (!units.size) {
             return null;
         }
-        const budget = readAvailableBudget(root, window.game_data || gameData);
+        const budget = readAvailableBudget(root, gamePage.game_data || gameData);
 
         return {
             kind: 'single',
             scope: form,
-            villageId: String(window.game_data?.village?.id || gameData.village?.id || search.get('village') || ''),
+            villageId: String(gamePage.game_data?.village?.id || gameData.village?.id || search.get('village') || ''),
             units,
             counts: Object.fromEntries([...units].map(([unit, entry]) => [unit, entry.total])),
             queued: Object.fromEntries([...units].map(([unit, entry]) => [unit, entry.queued])),
@@ -390,7 +849,7 @@
                 cost: readUnitCost(row, unit),
                 statusElement
             };
-            attachRecruitInputListener(entry);
+            if (decorate) attachRecruitInputListener(entry);
             entries.set(unit, entry);
         }
         return entries;
@@ -516,7 +975,9 @@
     function parseCountPair(scope) {
         const cells = scope.matches?.('td, th') ? [scope] : [...scope.querySelectorAll('td, th')];
         for (const cell of cells) {
-            const match = cell.textContent.match(/^\s*([0-9][0-9.\s\u00a0]*)\s*\/\s*([0-9][0-9.\s\u00a0]*)\s*$/);
+            const native = cell.cloneNode(true);
+            native.querySelectorAll('.ds-tt-delta').forEach(node => node.remove());
+            const match = native.textContent.match(/^\s*([0-9][0-9.\s\u00a0]*)\s*\/\s*([0-9][0-9.\s\u00a0]*)\s*$/);
             if (match) {
                 return {
                     home: parseFormattedInt(match[1]),
@@ -611,7 +1072,7 @@
             }
 
             if (value === null) {
-                const managerCost = window.unit_managers?.units?.[unit]?.[resource];
+                const managerCost = gamePage.unit_managers?.units?.[unit]?.[resource];
                 value = Number.isFinite(Number(managerCost)) ? Math.floor(Number(managerCost)) : null;
             }
 
@@ -1160,6 +1621,7 @@
     }
 
     async function applyTemplate() {
+        if (dsControl?.paused()) { notify('Kontrollzentrum: normale Rekrutierung pausiert.', true); return; }
         if (mode === 'train' && !state.templateActive) {
             notify('Bitte zuerst eine Vorlage auswählen oder Sollbestände eingeben.', true);
             return;
@@ -1753,10 +2215,10 @@
             return;
         }
         try {
-            if (error && typeof window.UI?.ErrorMessage === 'function') {
-                window.UI.ErrorMessage(message, 3000);
-            } else if (!error && typeof window.UI?.SuccessMessage === 'function') {
-                window.UI.SuccessMessage(message, 2500);
+            if (error && typeof gamePage.UI?.ErrorMessage === 'function') {
+                gamePage.UI.ErrorMessage(message, 3000);
+            } else if (!error && typeof gamePage.UI?.SuccessMessage === 'function') {
+                gamePage.UI.SuccessMessage(message, 2500);
             }
         } catch (_) {
             // Der Text im eingebetteten Statusfeld bleibt als Fallback sichtbar.

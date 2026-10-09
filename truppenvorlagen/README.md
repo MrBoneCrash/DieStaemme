@@ -41,7 +41,7 @@ Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler st
 
 `truppenvorlagen.user.js` erweitert die vorhandene Einzel- und
 Massenrekrutierung von **Die Stämme** um lokal gespeicherte Sollvorlagen.
-Es öffnet kein Overlay und sendet keine Rekrutierung selbst ab.
+Es öffnet kein Overlay. Die normale Rekrutierung kann über das Kontrollzentrum konkrete Rekrutierungsaufträge empfangen und über den nativen **Rekrutieren**-Button abschicken. Die Massenrekrutierung bleibt manuell.
 
 ## Installation
 
@@ -56,9 +56,17 @@ Es öffnet kein Overlay und sendet keine Rekrutierung selbst ab.
 1. Einen Vorlagennamen und die gewünschten Gesamtbestände eingeben.
 2. **Speichern** anklicken.
 3. Die Abweichungen stehen direkt an den nativen Einheiten-/Rekrutierungsfeldern.
-4. **Fehlbestand eintragen** füllt die nativen Felder. Das Spiel wird nicht
-   automatisch abgesendet; die Werte vor dem eigenen Klick auf
-   **Rekrutieren** prüfen.
+4. **Fehlbestand eintragen** füllt bei manueller Bedienung die nativen Felder. Dieser Button sendet selbst nicht ab; die Werte vor dem eigenen Klick auf **Rekrutieren** prüfen. Automatische Aufträge kommen ausschließlich vom Kontrollzentrum auf der normalen Rekrutierungsseite.
+
+## Kontrollzentrum: normale Rekrutierung
+
+Im Konstruktionshelfer eine Bauvorlage laden und pro Dorf eine Truppenvorlage auf der normalen Rekrutierungsseite speichern/zuweisen. Das Kontrollzentrum erkennt die Truppenvorlagen beim ersten Besuch. Die Rekrutierungsautomatik ist für eine konfigurierte Vorlage zunächst an und lässt sich im Kontrollzentrum pro Dorf ausschalten.
+
+Der verfügbare Platz wird nach Abzug der Baureserve für alle noch offenen Schritte bis zum nächsten Bauernhof berechnet. Ein Bauernhofabschluss löst eine neue Kapazitätsprüfung aus; ansonsten wird stündlich geprüft. Das Kontrollzentrum übergibt konkrete Truppenzahlen. Hier werden diese auf aktuelle Fehlbestände einschließlich Rekrutierungswarteschlangen, Kosten, Rohstoffe, native Maximalmengen und verbleibende Baureserve begrenzt. Vor Eintragen und Abschicken wird jeweils zufällig 1–4 Sekunden gewartet. Änderungen an Vorlage, Ressourcen, Automatik, Eingaben oder Aktivitätscheck-Pause können den Auftrag noch vor dem Klick stoppen.
+
+Manuell belegte Rekrutierungsfelder werden nicht überschrieben. Native Spielbestätigung beziehungsweise neue Warteschlange bestätigt den Auftrag. Fehlt die Antwort, wird der Auftrag als unklar angezeigt und derselbe Befehl nicht nochmals abgesendet. Der Browser muss Tab-Sperren (`navigator.locks`) unterstützen. Die Massenansicht empfängt keine automatischen Aufträge oder Pausenbefehle; ihre bisherige manuelle Bedienung bleibt erhalten.
+
+Die letzte Prüfung liest die nativen Maximalmengen ohne die bereits eingetragenen Auftragstruppen und stellt die Eingaben sofort wieder her. So wird die Mengenreduzierung durch den eigenen Auftrag nicht als Bestandsänderung gewertet. Tatsächlich fehlende Rohstoffe, Bauernhofkapazität oder veränderte Eingaben stoppen weiterhin das Abschicken.
 
 Standardmäßig werden bereits laufende Rekrutierungen zum Istbestand gezählt.
 Wenn die Rohstoffe nicht für den gesamten Fehlbestand reichen, berechnet das

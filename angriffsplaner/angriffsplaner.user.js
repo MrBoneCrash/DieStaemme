@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.5.3
+// @version      1.5.4
 // @description  Plant Fakes und Offs aus eigenen Beständen mit TWForge-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -19,7 +19,7 @@
     'use strict';
     const ID = 'ds-angriffsplaner';
     const OFF = ['axe', 'light', 'marcher', 'ram', 'catapult'];
-    const FILL = ['spy', 'spear', 'axe', 'sword', 'archer', 'light', 'marcher', 'heavy'];
+    const FILL = ['spy', 'axe', 'sword', 'archer', 'light', 'marcher', 'heavy'];
     const NAMES = { spear: 'Speerträger', sword: 'Schwertkämpfer', axe: 'Axtkämpfer', archer: 'Bogenschütze',
         spy: 'Späher', light: 'Leichte Kavallerie', marcher: 'Berittener Bogenschütze', heavy: 'Schwere Kavallerie',
         ram: 'Rammbock', catapult: 'Katapult', knight: 'Paladin', snob: 'Adelsgeschlecht' };
@@ -106,6 +106,7 @@
         if (!Number.isFinite(source.points) || source.points < 0) throw new Error(`Dorfpunkte fehlen für ${source.coords}.`);
         return Math.max(1, Math.ceil(source.points * world.fakeLimit / 100 - 1e-9));
     }
+    function fakeMinimumPop(source, world) { return minimumPop(source, world) + 3; }
     function population(troops, world) { return Object.entries(troops).reduce((sum, [u, n]) => sum + n * (world.units[u]?.pop || 0), 0); }
     function offensivePopulation(stock, world) { return population(Object.fromEntries(OFF.map(u => [u, stock[u] || 0])), world); }
     function minimumOff(config) { return typeof config.minimumOff === 'number' ? config.minimumOff : 1; }
@@ -119,15 +120,19 @@
     }
     function attack(troops, world) { return Object.entries(troops).reduce((sum, [u, n]) => sum + n * (world.units[u]?.attack || 0), 0); }
     function fakePacket(stock, source, world) {
-        const siege = stock.ram > 0 ? 'ram' : stock.catapult > 0 ? 'catapult' : null;
+        const siege = world.units.catapult && stock.catapult > 0 ? 'catapult' : world.units.ram && stock.ram > 0 ? 'ram' : null;
         if (!siege) return null;
-        const troops = { [siege]: 1 };
-        let missing = minimumPop(source, world) - world.units[siege].pop;
+        const scout = world.units.spy && stock.spy > 0 ? 1 : 0;
+        const minimum = fakeMinimumPop(source, world), scoutPop = scout * (world.units.spy?.pop || 0);
+        // Möglichst Katapulte + genau einen Späher; nur bei knappen Katapulten weitere Fülltruppen.
+        const count = siege === 'catapult' ? Math.min(stock.catapult, Math.max(1, Math.ceil((minimum - scoutPop) / world.units.catapult.pop))) : 1;
+        const troops = { [siege]: count, ...(scout ? { spy: 1 } : {}) };
+        let missing = minimum - count * world.units[siege].pop - scoutPop;
         for (const u of FILL) {
             if (!(missing > 0)) break;
             if (!world.units[u] || !(stock[u] > 0)) continue;
-            const n = Math.min(stock[u], Math.ceil(missing / world.units[u].pop));
-            if (n > 0) { troops[u] = n; missing -= n * world.units[u].pop; }
+            const n = Math.min(stock[u] - (troops[u] || 0), Math.ceil(missing / world.units[u].pop));
+            if (n > 0) { troops[u] = (troops[u] || 0) + n; missing -= n * world.units[u].pop; }
         }
         return missing <= 0 ? troops : null;
     }
@@ -460,7 +465,7 @@
         let fake = 0, off = 0;
         for (const source of sources) {
             // Auch ein Off-Dorf kann nach einer Off einen Restbestand unterhalb der Mindest-Off-Größe für Fakes nutzen.
-            const min = minimumPop(source, world), siege = (source.troops.ram || 0) + (source.troops.catapult || 0);
+            const min = fakeMinimumPop(source, world), siege = (source.troops.ram || 0) + (source.troops.catapult || 0);
             const usable = Object.fromEntries([...OFF, ...FILL].filter((u, i, a) => a.indexOf(u) === i).map(u => [u, source.troops[u] || 0]));
             fake += Math.min(siege, Math.floor(population(usable, world) / min));
             if (source.role !== 'fake' && meetsOff(source.troops, world, config) && offensivePopulation(source.troops, world) >= minimumPop(source, world)) off++;
@@ -478,7 +483,7 @@
     }
     // Dedicated worker: the allocation search must not freeze the game UI on large accounts.
     function workerSource() {
-        const functions = [parts, formatTime, minimumPop, population, offensivePopulation, minimumOff, meetsOff, canFake, attack, fakePacket, defense, offPacket,
+        const functions = [parts, formatTime, minimumPop, fakeMinimumPop, population, offensivePopulation, minimumOff, meetsOff, canFake, attack, fakePacket, defense, offPacket,
             inNight, nextDaylight, daytimeIntervals, timing, counts, clamp, subtract, chooseArrival, bounds,
             allocate, compare, optimizeTimes, anchors, plan, capacityUpper, findCapacity];
         return `'use strict';const OFF=${JSON.stringify(OFF)},FILL=${JSON.stringify(FILL)},DAY=${DAY},LIMIT=${LIMIT},timingCaches=new WeakMap();
@@ -530,7 +535,7 @@
         return `${row.id}&${row.target.id}&${row.unit}&${row.arrival}&${type}&false&false&` +
             Object.entries(row.troops).filter(([, n]) => n > 0).map(([u, n]) => `${u}=${encode(String(n))}`).join('/') + '&1\n';
     }
-    const core = { amount, parts, formatTime, parseTime, parseMap, resolveTargets, readTemplates, minimumPop, population, offensivePopulation, meetsOff, dbPayload, dbError,
+    const core = { amount, parts, formatTime, parseTime, parseMap, resolveTargets, readTemplates, minimumPop, fakeMinimumPop, population, offensivePopulation, meetsOff, dbPayload, dbError,
         attack, fakePacket, normalizeReport, defense, offPacket, inNight, nextDaylight, daytimeIntervals, timing, counts,
         bounds, plan, capacityUpper, findCapacity, parseWorld, parsePlace, workbench, workerSource, defaultWindows, persistentSettings, LIMIT };
     if (typeof module === 'object' && module.exports) { module.exports = core; return; }
@@ -665,7 +670,7 @@
     function renderSources() {
         const search = $('[data-source-search]').value.toLocaleLowerCase('de');
         $('[data-sources]').innerHTML = sources.filter(s => `${s.name} ${s.coords}`.toLocaleLowerCase('de').includes(search)).map(s =>
-            `<div class="ds-source"><label><input type="checkbox" data-source="${s.id}" ${s.selected ? 'checked' : ''}><strong>${escape(s.name)}</strong><small>${s.coords} · ${s.points.toLocaleString('de-DE')} Punkte · Fake ≥ ${minimumPop(s, world)} BH</small></label>
+            `<div class="ds-source"><label><input type="checkbox" data-source="${s.id}" ${s.selected ? 'checked' : ''}><strong>${escape(s.name)}</strong><small>${s.coords} · ${s.points.toLocaleString('de-DE')} Punkte · Fake ≥ ${fakeMinimumPop(s, world)} BH (inkl. +3)</small></label>
             <select data-role="${s.id}" aria-label="Rolle für ${s.coords}">${[['both', 'Offs + Fakes'], ['off', 'Nur Offs'], ['fake', 'Nur Fakes']].map(([v, n]) => `<option value="${v}" ${s.role === v ? 'selected' : ''}>${n}</option>`).join('')}</select>${troopHTML(s.troops)}</div>`).join('');
         $('[data-source-count]').textContent = `${sources.filter(s => s.selected).length} / ${sources.length} gewählt`;
     }
@@ -1166,10 +1171,9 @@
         resetWindows();
         map = parseMap(players, villages, allies);
         validateTargets();
-        $('[data-world]').textContent = `Welt ${gd.world} · Fakelimit ${world.fakeLimit} % der Quelldorfpunkte · ${world.night.active ? `Nachtbonus ${world.night.start}:00–${world.night.end}:00` : 'Kein Nachtbonus'} · Laufzeiten aus der Weltkonfiguration.`;
+        $('[data-world]').textContent = `Welt ${gd.world} · Fakelimit ${world.fakeLimit} % der Quelldorfpunkte + 3 Einwohner Reserve · Fakes bevorzugt Katapulte + 1 Späher, ohne Speere · ${world.night.active ? `Nachtbonus ${world.night.start}:00–${world.night.end}:00` : 'Kein Nachtbonus'} · Laufzeiten aus der Weltkonfiguration.`;
         await loadSources(); persist(); message('Ziele eingeben, Quelldörfer wählen und Kapazität berechnen.');
     }
     run(init);
     const timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); abort.abort(); activeWorker?.terminate(); return; } tick(); }, 1000);
 })();
-

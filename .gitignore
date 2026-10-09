@@ -1,5 +1,10 @@
 # Lokale Tests und gespeicherte Spielseiten
-/test/
+test/
+tests/
+
+# Lokale Entwicklungswerkzeuge; Nutzer installieren die fertigen Userscripts
+/kontrollzentrum/control-client.js
+/kontrollzentrum/sync-clients.cjs
 
 # Lokale Sicherungen und private Konfiguration
 /.local/

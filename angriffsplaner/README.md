@@ -147,21 +147,27 @@ auswärtiger Truppen oder fremder Unterstützung. Die Abfragen laufen mit höchs
 zwei parallelen gleichursprünglichen GET-Anfragen. Bestände mit unlesbaren Werten
 führen zu einem Fehler statt zu einer Schätzung.
 
-Die Mindestgröße ist:
+Die Fake-Größe einschließlich der gewünschten Reserve ist:
 
 ```text
-max(1, aufrunden(Punkte des Quelldorfs × fake_limit / 100)) Bauernhofplätze
+max(1, aufrunden(Punkte des Quelldorfs × fake_limit / 100)) + 3 Bauernhofplätze
 ```
 
 `fake_limit` kommt aus `/interface.php?func=get_config`; Bauernhofbedarf und
 Einheitenwerte aus `/interface.php?func=get_unit_info`. Punkte werden aus der
 aktuellen Dorfseite bevorzugt, andernfalls aus der Weltkarte übernommen. Ein Fake
-enthält genau eine Ramme, bei fehlenden Rammen ein Katapult. Deren Bauernhofbedarf
-zählt bereits zum Mindestwert. Der Rest wird vorrangig mit Spähern, danach mit
-Speeren, Äxten, Schwertern, Bogenschützen und erst danach Kavallerie aufgefüllt.
-Beispiel: Bei 10.001 Dorfpunkten und 1 % Limit braucht ein Fake 101 BH; eine Ramme
-mit 5 BH und 48 Späher mit je 2 BH erfüllen das genau. Ohne Belagerungseinheit oder
-ausreichenden Bestand entsteht kein Fake. Auch Offs müssen das Mindestlimit erfüllen.
+verwendet bevorzugt **genügend Katapulte + genau einen Späher**, um das Weltlimit
+mit mindestens **3 Einwohnern Reserve** zu überschreiten. Speerträger werden
+**niemals für Fakes verwendet**. Reichen die Katapulte nicht, wird mit weiteren
+Spähern, danach Äxten, Schwertern, Bogenschützen und Kavallerie aufgefüllt.
+Ohne Katapulte dient eine Ramme als Ersatz. Fehlende Späher verhindern einen
+ansonsten ausreichend großen Fake nicht.
+Beispiel: Bei 10.001 Dorfpunkten und 1 % Limit beträgt das Weltlimit 101 BH,
+der Planer verlangt mindestens 104 BH. 13 Katapulte und 1 Späher ergeben 106 BH;
+als Rammbock-Ersatz ergeben 1 Ramme und 50 Späher 105 BH. Ganze Einheiten können
+die Reserve etwas überschreiten. Ohne ausreichenden Bestand entsteht kein Fake.
+Anzeige, Kapazitätsberechnung, Tarnfake-Reservierung und Export verwenden dieselbe
+erhöhte Fake-Größe. Offs müssen weiterhin das eigentliche Weltlimit erfüllen.
 
 Für jeden geplanten Befehl werden Truppen vom gemeinsamen Dorfbestand abgezogen.
 Mehrere Befehle aus demselben Dorf verwenden unterschiedliche Truppen. Rückkehrende
