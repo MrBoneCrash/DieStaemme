@@ -4,7 +4,7 @@
 
 ## GitHub-Loader
 
-Tampermonkey startet diesen Loader über die `@match`-Einträge ausschließlich auf folgenden Seiten: **Dorfinfo sowie der vom Planer vorbereitete Versammlungsplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle.
+Tampermonkey startet diesen Loader über kurze `@match`-Einträge und exakte `@exclude`-Filter ausschließlich auf folgenden Seiten: **Dorfinfo sowie der vom Planer vorbereitete Versammlungsplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle. Die Ausschlussfilter verhindern ähnlich benannte Seiten oder Tabs und mehrdeutige doppelte Routing-Parameter.
 
 In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
 
@@ -14,44 +14,13 @@ Auf der Dorfinfo und beim Öffnen eines vom Planer vorbereiteten Versammlungspla
 // ==UserScript==
 // @name         Die Stämme – Einzelziel-Snipe (GitHub-Loader)
 // @namespace    local.die-staemme.loader.einzelziel-snipe
-// @version      1.1.1
+// @version      1.1.2
 // @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php?screen=info_village
-// @match        https://*.die-staemme.de/game.php?screen=info_village&*
-// @match        https://*.die-staemme.de/game.php?*&screen=info_village
-// @match        https://*.die-staemme.de/game.php?*&screen=info_village&*
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&screen=place&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&*&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&*&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&*&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&*&screen=place&*
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&screen=place&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&*&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&*&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&*&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&*&screen=place&*
+// @match        https://*.die-staemme.de/game.php?*screen=info_village*
+// @match        https://*.die-staemme.de/game.php?*screen=place*ds_snipe_command=*
+// @match        https://*.die-staemme.de/game.php?*ds_snipe_command=*screen=place*
+// @exclude      /^[^?]+\?(?!(?:(?=(?:[^#]*&)?screen=info_village(?:&|#|$))(?=(?:[^#]*&)?id=[1-9]\d*(?:&|#|$))|(?=(?:[^#]*&)?screen=place(?:&|#|$))(?=(?:[^#]*&)?ds_snipe_command=(?:attack|support)(?:&|#|$))(?!(?:[^#]*&)?try(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$))))/
+// @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode|ds_snipe_command|id)=[^#]*&\1=/
 // @grant        none
 // @run-at       document-idle
 // @noframes

@@ -1,24 +1,12 @@
 // ==UserScript==
 // @name         Die Stämme – Premium-Depot-Verkaufshelfer
 // @namespace    local.die-staemme.premium-depot
-// @version      1.0.1
+// @version      1.0.2
 // @description  Plant Verkäufe mit Depotkapazität, Händlerlimit, Reserven und Kursprüfung im Bestätigungsdialog. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php?screen=market&mode=exchange
-// @match        https://*.die-staemme.de/game.php?screen=market&mode=exchange&*
-// @match        https://*.die-staemme.de/game.php?screen=market&*&mode=exchange
-// @match        https://*.die-staemme.de/game.php?screen=market&*&mode=exchange&*
-// @match        https://*.die-staemme.de/game.php?*&screen=market&mode=exchange
-// @match        https://*.die-staemme.de/game.php?*&screen=market&mode=exchange&*
-// @match        https://*.die-staemme.de/game.php?*&screen=market&*&mode=exchange
-// @match        https://*.die-staemme.de/game.php?*&screen=market&*&mode=exchange&*
-// @match        https://*.die-staemme.de/game.php?mode=exchange&screen=market
-// @match        https://*.die-staemme.de/game.php?mode=exchange&screen=market&*
-// @match        https://*.die-staemme.de/game.php?mode=exchange&*&screen=market
-// @match        https://*.die-staemme.de/game.php?mode=exchange&*&screen=market&*
-// @match        https://*.die-staemme.de/game.php?*&mode=exchange&screen=market
-// @match        https://*.die-staemme.de/game.php?*&mode=exchange&screen=market&*
-// @match        https://*.die-staemme.de/game.php?*&mode=exchange&*&screen=market
-// @match        https://*.die-staemme.de/game.php?*&mode=exchange&*&screen=market&*
+// @match        https://*.die-staemme.de/game.php?*screen=market*mode=exchange*
+// @match        https://*.die-staemme.de/game.php?*mode=exchange*screen=market*
+// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=market(?:&|#|$))(?=(?:[^#]*&)?mode=exchange(?:&|#|$)))/
+// @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==

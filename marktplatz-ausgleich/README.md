@@ -4,7 +4,7 @@
 
 ## GitHub-Loader
 
-Tampermonkey startet diesen Loader über die `@match`-Einträge ausschließlich auf folgenden Seiten: **Marktplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle.
+Tampermonkey startet diesen Loader über kurze `@match`-Einträge und exakte `@exclude`-Filter ausschließlich auf folgenden Seiten: **Marktplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle. Die Ausschlussfilter verhindern ähnlich benannte Seiten oder Tabs und mehrdeutige doppelte Routing-Parameter.
 
 In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
 
@@ -14,12 +14,11 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 // ==UserScript==
 // @name         Die Stämme – Marktplatz-Ausgleich (GitHub-Loader)
 // @namespace    local.die-staemme.loader.marktplatz-ausgleich
-// @version      1.0.1
+// @version      1.0.2
 // @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php?screen=market
-// @match        https://*.die-staemme.de/game.php?screen=market&*
-// @match        https://*.die-staemme.de/game.php?*&screen=market
-// @match        https://*.die-staemme.de/game.php?*&screen=market&*
+// @match        https://*.die-staemme.de/game.php?*screen=market*
+// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=market(?:&|#|$)))/
+// @exclude      /^[^?]+\?(?:[^#]*&)?(screen)=[^#]*&\1=/
 // @grant        none
 // @run-at       document-idle
 // @noframes

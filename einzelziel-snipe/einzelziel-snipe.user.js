@@ -1,44 +1,13 @@
 // ==UserScript==
 // @name         Die Stämme – Einzelziel-Snipe
 // @namespace    local.die-staemme.einzelziel-snipe
-// @version      1.4.1
+// @version      1.4.2
 // @description  Berechnet Abschickzeiten für ein Ziel und exportiert alle ausgewählten verfügbaren Einheiten nach Workbench. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php?screen=info_village
-// @match        https://*.die-staemme.de/game.php?screen=info_village&*
-// @match        https://*.die-staemme.de/game.php?*&screen=info_village
-// @match        https://*.die-staemme.de/game.php?*&screen=info_village&*
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=attack
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=attack&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&screen=place&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&*&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&*&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&*&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&*&screen=place&*
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=support
-// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=support&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&screen=place&*
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&*&screen=place
-// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&*&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&screen=place&*
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&*&screen=place
-// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&*&screen=place&*
+// @match        https://*.die-staemme.de/game.php?*screen=info_village*
+// @match        https://*.die-staemme.de/game.php?*screen=place*ds_snipe_command=*
+// @match        https://*.die-staemme.de/game.php?*ds_snipe_command=*screen=place*
+// @exclude      /^[^?]+\?(?!(?:(?=(?:[^#]*&)?screen=info_village(?:&|#|$))(?=(?:[^#]*&)?id=[1-9]\d*(?:&|#|$))|(?=(?:[^#]*&)?screen=place(?:&|#|$))(?=(?:[^#]*&)?ds_snipe_command=(?:attack|support)(?:&|#|$))(?!(?:[^#]*&)?try(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$))))/
+// @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode|ds_snipe_command|id)=[^#]*&\1=/
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
