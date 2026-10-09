@@ -1,9 +1,12 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.5.0
+// @version      1.5.1
 // @description  Plant Fakes und Offs aus eigenen Beständen mit TWForge-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=place
+// @match        https://*.die-staemme.de/game.php?screen=place&*
+// @match        https://*.die-staemme.de/game.php?*&screen=place
+// @match        https://*.die-staemme.de/game.php?*&screen=place&*
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
 // @connect      twforge.net
@@ -534,7 +537,7 @@
     if (typeof module === 'object' && module.exports) { module.exports = core; return; }
 
     const win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    if (!win.game_data || !win.game_data.player?.id || win.game_data.screen !== 'place') return;
+    if (!win.game_data || !win.game_data.player?.id) return;
     const existing = document.getElementById(ID);
     if (existing) { existing.querySelectorAll('details').forEach(e => { e.open = false; }); return; }
     const gd = win.game_data, units = gd.units.filter(u => NAMES[u]);

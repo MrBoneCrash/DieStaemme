@@ -1,10 +1,13 @@
 // ==UserScript==
 // @name         Die Stämme – Truppenvorlagen in der Rekrutierung
 // @namespace    local.die-staemme.truppenvorlagen
-// @version      0.3.1
+// @version      0.3.2
 // @description  Zeigt Soll-/Ist-Abweichungen und füllt Fehlbestände in Einzel- und Massenrekrutierung. Sendet niemals selbst ab. Nutzung auf eigene Gefahr.
 // @author       Lokal
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=train
+// @match        https://*.die-staemme.de/game.php?screen=train&*
+// @match        https://*.die-staemme.de/game.php?*&screen=train
+// @match        https://*.die-staemme.de/game.php?*&screen=train&*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -15,7 +18,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '0.3.1';
+    const VERSION = '0.3.2';
     const SCRIPT_ID = 'ds-troop-templates';
     const STORAGE_VERSION = 1;
     const STORAGE_PREFIX = 'ds-troop-templates';
@@ -244,10 +247,9 @@
 
     const gameData = window.game_data || {};
     const search = new URLSearchParams(window.location.search);
-    const screen = search.get('screen') || gameData.screen;
     const mode = search.get('mode') || gameData.mode || 'train';
 
-    if (screen !== 'train' || !['train', 'mass'].includes(mode)) {
+    if (!['train', 'mass'].includes(mode)) {
         return;
     }
 

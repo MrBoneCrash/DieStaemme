@@ -1,9 +1,44 @@
 // ==UserScript==
 // @name         Die Stämme – Einzelziel-Snipe
 // @namespace    local.die-staemme.einzelziel-snipe
-// @version      1.4.0
+// @version      1.4.1
 // @description  Berechnet Abschickzeiten für ein Ziel und exportiert alle ausgewählten verfügbaren Einheiten nach Workbench. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=info_village
+// @match        https://*.die-staemme.de/game.php?screen=info_village&*
+// @match        https://*.die-staemme.de/game.php?*&screen=info_village
+// @match        https://*.die-staemme.de/game.php?*&screen=info_village&*
+// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=attack
+// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=attack&*
+// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=attack
+// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=attack&*
+// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=attack
+// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=attack&*
+// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=attack
+// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=attack&*
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&screen=place
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&screen=place&*
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&*&screen=place
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=attack&*&screen=place&*
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&screen=place
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&screen=place&*
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&*&screen=place
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=attack&*&screen=place&*
+// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=support
+// @match        https://*.die-staemme.de/game.php?screen=place&ds_snipe_command=support&*
+// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=support
+// @match        https://*.die-staemme.de/game.php?screen=place&*&ds_snipe_command=support&*
+// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=support
+// @match        https://*.die-staemme.de/game.php?*&screen=place&ds_snipe_command=support&*
+// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=support
+// @match        https://*.die-staemme.de/game.php?*&screen=place&*&ds_snipe_command=support&*
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&screen=place
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&screen=place&*
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&*&screen=place
+// @match        https://*.die-staemme.de/game.php?ds_snipe_command=support&*&screen=place&*
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&screen=place
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&screen=place&*
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&*&screen=place
+// @match        https://*.die-staemme.de/game.php?*&ds_snipe_command=support&*&screen=place&*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==

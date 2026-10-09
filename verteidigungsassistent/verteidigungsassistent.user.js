@@ -1,10 +1,33 @@
 // ==UserScript==
 // @name         Die Stämme – Verteidigungsassistent
 // @namespace    local.die-staemme.verteidigungsassistent
-// @version      1.4.4
+// @version      1.4.5
 // @description  Gruppiert Eingehende, bewertet erklärbar das Risiko und plant manuell zu bestätigende Unterstützungen und Ausweichbefehle anhand der Weltdaten. Nutzung auf eigene Gefahr.
 // @author       Lokal
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&mode=incomings
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&*&mode=incomings
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&*&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&mode=incomings
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&*&mode=incomings
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&*&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?mode=incomings&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?mode=incomings&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?mode=incomings&*&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?mode=incomings&*&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&*&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&*&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?screen=map
+// @match        https://*.die-staemme.de/game.php?screen=map&*
+// @match        https://*.die-staemme.de/game.php?*&screen=map
+// @match        https://*.die-staemme.de/game.php?*&screen=map&*
+// @match        https://*.die-staemme.de/game.php?screen=place
+// @match        https://*.die-staemme.de/game.php?screen=place&*
+// @match        https://*.die-staemme.de/game.php?*&screen=place
+// @match        https://*.die-staemme.de/game.php?*&screen=place&*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -15,7 +38,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '1.4.4';
+    const VERSION = '1.4.5';
     const SCRIPT_ID = 'ds-defense-assistant';
     const STORAGE_VERSION = 1;
     const STORAGE_PREFIX = 'ds-defense-assistant';
@@ -1117,7 +1140,6 @@
     const isIncomingScreen = screen === 'overview_villages' && mode === 'incomings';
     const isPlaceScreen = screen === 'place';
     const isMapScreen = screen === 'map';
-    if (!isIncomingScreen && !isPlaceScreen && !isMapScreen) return;
     if (document.getElementById(`${SCRIPT_ID}-root`)) return;
 
     const state = {

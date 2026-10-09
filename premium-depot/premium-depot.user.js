@@ -1,9 +1,24 @@
 // ==UserScript==
 // @name         Die Stämme – Premium-Depot-Verkaufshelfer
 // @namespace    local.die-staemme.premium-depot
-// @version      1.0.0
+// @version      1.0.1
 // @description  Plant Verkäufe mit Depotkapazität, Händlerlimit, Reserven und Kursprüfung im Bestätigungsdialog. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=market&mode=exchange
+// @match        https://*.die-staemme.de/game.php?screen=market&mode=exchange&*
+// @match        https://*.die-staemme.de/game.php?screen=market&*&mode=exchange
+// @match        https://*.die-staemme.de/game.php?screen=market&*&mode=exchange&*
+// @match        https://*.die-staemme.de/game.php?*&screen=market&mode=exchange
+// @match        https://*.die-staemme.de/game.php?*&screen=market&mode=exchange&*
+// @match        https://*.die-staemme.de/game.php?*&screen=market&*&mode=exchange
+// @match        https://*.die-staemme.de/game.php?*&screen=market&*&mode=exchange&*
+// @match        https://*.die-staemme.de/game.php?mode=exchange&screen=market
+// @match        https://*.die-staemme.de/game.php?mode=exchange&screen=market&*
+// @match        https://*.die-staemme.de/game.php?mode=exchange&*&screen=market
+// @match        https://*.die-staemme.de/game.php?mode=exchange&*&screen=market&*
+// @match        https://*.die-staemme.de/game.php?*&mode=exchange&screen=market
+// @match        https://*.die-staemme.de/game.php?*&mode=exchange&screen=market&*
+// @match        https://*.die-staemme.de/game.php?*&mode=exchange&*&screen=market
+// @match        https://*.die-staemme.de/game.php?*&mode=exchange&*&screen=market&*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -99,8 +114,6 @@
         module.exports = { number, revenue, plan, choose, checkQuote };
         return;
     }
-    const url = new URL(location.href);
-    if (url.searchParams.get('screen') !== 'market' || url.searchParams.get('mode') !== 'exchange') return;
     const exchange = window.PremiumExchange;
     const form = document.querySelector('#premium_exchange_form');
     if (!exchange || !form || document.getElementById(ID)) return;

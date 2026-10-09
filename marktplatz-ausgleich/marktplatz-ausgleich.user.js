@@ -1,10 +1,13 @@
 // ==UserScript==
 // @name         Die Stämme – Marktplatz-Ausgleich
 // @namespace    local.die-staemme.marktplatz-ausgleich
-// @version      0.6.2
+// @version      0.6.3
 // @description  Plant Tauschangebote für auswählbare eigene Dörfer und stellt jede geprüfte Angebotsgruppe erst nach einem eigenen Klick ein. Nutzung auf eigene Gefahr.
 // @author       Lokal
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=market
+// @match        https://*.die-staemme.de/game.php?screen=market&*
+// @match        https://*.die-staemme.de/game.php?*&screen=market
+// @match        https://*.die-staemme.de/game.php?*&screen=market&*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -529,10 +532,7 @@
     }
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     if (window.top !== window.self) return;
-    const search = new URLSearchParams(window.location.search);
     const gameData = window.game_data || {};
-    const screen = search.get('screen') || gameData.screen;
-    if (screen !== 'market') return;
     if (document.getElementById(`${SCRIPT_ID}-panel`)) return;
 
     const storageKey = `${SCRIPT_ID}:1:${window.location.host}:${gameData.world || window.location.hostname}:${gameData.player?.id || 'unknown'}`;

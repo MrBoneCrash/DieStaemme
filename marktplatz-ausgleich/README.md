@@ -4,17 +4,22 @@
 
 ## GitHub-Loader
 
+Tampermonkey startet diesen Loader über die `@match`-Einträge ausschließlich auf folgenden Seiten: **Marktplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle.
+
 In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
 
-Bei jedem vollständigen Seitenaufruf wird die aktuelle auf GitHub veröffentlichte Version aus `master` geladen. Für ein Update eine bereits geöffnete Spielseite neu laden. GitHubs Bereitstellung kann kurz verzögert sein.
+Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub veröffentlichte Version aus `master` geladen. Für ein Update eine bereits geöffnete Spielseite neu laden. GitHubs Bereitstellung kann kurz verzögert sein.
 
 ```javascript
 // ==UserScript==
 // @name         Die Stämme – Marktplatz-Ausgleich (GitHub-Loader)
 // @namespace    local.die-staemme.loader.marktplatz-ausgleich
-// @version      1.0.0
+// @version      1.0.1
 // @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=market
+// @match        https://*.die-staemme.de/game.php?screen=market&*
+// @match        https://*.die-staemme.de/game.php?*&screen=market
+// @match        https://*.die-staemme.de/game.php?*&screen=market&*
 // @grant        none
 // @run-at       document-idle
 // @noframes

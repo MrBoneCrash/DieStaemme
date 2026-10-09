@@ -4,17 +4,42 @@
 
 ## GitHub-Loader
 
+Tampermonkey startet diesen Loader über die `@match`-Einträge ausschließlich auf folgenden Seiten: **Eingehende, Karte und Versammlungsplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle.
+
 In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
 
-Bei jedem vollständigen Seitenaufruf wird die aktuelle auf GitHub veröffentlichte Version aus `master` geladen. Für ein Update eine bereits geöffnete Spielseite neu laden. GitHubs Bereitstellung kann kurz verzögert sein.
+Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub veröffentlichte Version aus `master` geladen. Für ein Update eine bereits geöffnete Spielseite neu laden. GitHubs Bereitstellung kann kurz verzögert sein.
 
 ```javascript
 // ==UserScript==
 // @name         Die Stämme – Verteidigungsassistent (GitHub-Loader)
 // @namespace    local.die-staemme.loader.verteidigungsassistent
-// @version      1.0.0
+// @version      1.0.1
 // @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
-// @match        https://*.die-staemme.de/game.php*
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&mode=incomings
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&*&mode=incomings
+// @match        https://*.die-staemme.de/game.php?screen=overview_villages&*&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&mode=incomings
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&*&mode=incomings
+// @match        https://*.die-staemme.de/game.php?*&screen=overview_villages&*&mode=incomings&*
+// @match        https://*.die-staemme.de/game.php?mode=incomings&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?mode=incomings&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?mode=incomings&*&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?mode=incomings&*&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&*&screen=overview_villages
+// @match        https://*.die-staemme.de/game.php?*&mode=incomings&*&screen=overview_villages&*
+// @match        https://*.die-staemme.de/game.php?screen=map
+// @match        https://*.die-staemme.de/game.php?screen=map&*
+// @match        https://*.die-staemme.de/game.php?*&screen=map
+// @match        https://*.die-staemme.de/game.php?*&screen=map&*
+// @match        https://*.die-staemme.de/game.php?screen=place
+// @match        https://*.die-staemme.de/game.php?screen=place&*
+// @match        https://*.die-staemme.de/game.php?*&screen=place
+// @match        https://*.die-staemme.de/game.php?*&screen=place&*
 // @grant        none
 // @run-at       document-idle
 // @noframes
