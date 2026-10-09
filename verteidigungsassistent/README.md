@@ -4,7 +4,7 @@
 
 ## GitHub-Loader
 
-Tampermonkey startet diesen Loader über kurze `@match`-Einträge und exakte `@exclude`-Filter ausschließlich auf folgenden Seiten: **Eingehende, Karte und Versammlungsplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle. Die Ausschlussfilter verhindern ähnlich benannte Seiten oder Tabs und mehrdeutige doppelte Routing-Parameter.
+Tampermonkey startet diesen Loader über kurze `@match`-Einträge und exakte `@exclude`-Filter ausschließlich auf folgenden Seiten: **Übersichten → Eingehend** (`screen=overview_villages&mode=incomings`). Auf Karte und Versammlungsplatz wird weder der Loader noch der Assistent gestartet. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle. Die Ausschlussfilter verhindern ähnlich benannte Seiten oder Tabs und mehrdeutige doppelte Routing-Parameter.
 
 In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
 
@@ -14,13 +14,11 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 // ==UserScript==
 // @name         Die Stämme – Verteidigungsassistent (GitHub-Loader)
 // @namespace    local.die-staemme.loader.verteidigungsassistent
-// @version      1.0.2
+// @version      1.0.3
 // @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=overview_villages*mode=incomings*
 // @match        https://*.die-staemme.de/game.php?*mode=incomings*screen=overview_villages*
-// @match        https://*.die-staemme.de/game.php?*screen=map*
-// @match        https://*.die-staemme.de/game.php?*screen=place*
-// @exclude      /^[^?]+\?(?!(?:(?=(?:[^#]*&)?screen=(?:map|place)(?:&|#|$))|(?=(?:[^#]*&)?screen=overview_villages(?:&|#|$))(?=(?:[^#]*&)?mode=incomings(?:&|#|$))))/
+// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=overview_villages(?:&|#|$))(?=(?:[^#]*&)?mode=incomings(?:&|#|$)))/
 // @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
 // @grant        none
 // @run-at       document-idle
@@ -42,8 +40,7 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 
 Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler stehen in der Browserkonsole. **Die Nutzung erfolgt auf eigene Gefahr; auch zukünftige Änderungen aus `master` werden automatisch ausgeführt.**
 
-`verteidigungsassistent.user.js` ergänzt die Eingehenden-, Karten- und
-Versammlungsplatzansicht. Es gruppiert Angriffswellen, trennt Fakten von
+`verteidigungsassistent.user.js` ergänzt ausschließlich die Eingehenden-Ansicht. Es gruppiert Angriffswellen, trennt Fakten von
 Indizien, schätzt einen konservativen Verteidigungsbedarf und erstellt manuell
 zu bestätigende Unterstützungs- und Ausweichpläne.
 
@@ -91,8 +88,6 @@ Spieler-ID. Es werden keine Daten an andere Server übertragen.
   Zeitplan mit Sende-, Abbruch-/Rückruf- und Rückkehrzeit.
 - Mauerstufen werden aus der Gebäudeübersicht gelesen; die manuelle Eingabe ist
   nur noch eine ausdrücklich aktivierte Ausnahme oder ein Fallback.
-- Auf der Karte erscheint eine kompakte Liste gefährdeter Dörfer zum
-  Zentrieren.
 
 ## Automatische Datenbasis und Verteidigungsmodell
 
@@ -175,8 +170,10 @@ Unterstützungsplan systematisch verfälschen.
 3. Die Tabelle zeigt Quelle, Ziel, Einheiten, Verteidigungswert, Laufzeit,
    letzten Sendezeitpunkt, benötigte Schutzdauer und eventuelle Restlücken.
 4. **Am Versammlungsplatz vorbereiten** öffnet das korrekte Quelldorf.
-5. Dort **Plan in Felder übernehmen** anklicken, alles prüfen und erst danach
-   den nativen Spielknopf selbst betätigen.
+5. Ziel und Truppen aus dem Plan manuell in die nativen Felder eintragen, alles
+   prüfen und erst danach den nativen Spielknopf selbst betätigen. Der Assistent
+   wird am Versammlungsplatz nicht geladen; **Plan in Felder übernehmen** steht
+   dort nicht zur Verfügung.
 
 Der Planer:
 
@@ -195,8 +192,8 @@ jedem Laden und anschließend alle 30 Sekunden von `Unterwegs` über
 Zieldorf und Truppen bleiben dabei vollständig sichtbar. Nach dem letzten für
 dieses Ziel eingeplanten Einschlag erscheint die klare Anweisung
 **Jetzt zurückschicken**. Sie öffnet die native Truppenansicht des richtigen
-Herkunftsdorfs, markiert dort die passende Zielzeile und bietet die native
-Rücksendeaktion an. Anschließend wird auch der berechnete Rückweg verfolgt.
+Herkunftsdorfs. Dort die passende Zielzeile selbst auswählen und die native
+Rücksendeaktion betätigen; der Assistent wird in dieser Ansicht nicht geladen. Anschließend wird auch der berechnete Rückweg verfolgt.
 
 Eine zuvor in die Felder übernommene Unterstützung wird zusätzlich gegen die
 nativen eingehenden Unterstützungsbefehle abgeglichen. Stimmen Herkunft, Ziel
@@ -349,8 +346,9 @@ Die Ausweichtabelle zeigt:
 - errechnete Rückkehr ins Heimatdorf,
 - lokale Arbeitsstatus und einen Link zum richtigen Versammlungsplatz.
 
-Am Versammlungsplatz füllt ein Klick Ziel und Truppen. Der native Knopf
-**Angreifen** oder **Unterstützen** wird weiterhin bewusst selbst betätigt.
+Am Versammlungsplatz Ziel und Truppen aus dem Plan manuell eintragen. Der native
+Knopf **Angreifen** oder **Unterstützen** wird bewusst selbst betätigt; eine
+zusätzliche Assistentenoberfläche wird dort nicht geladen.
 Ausweichpläne lassen sich je Dorf ausblenden und in der Dorfdetailansicht wieder
 aktivieren. Browser-Benachrichtigungen erinnern mit konfigurierbarem Vorlauf an
 das Wegschicken, solange die Eingehenden-Seite geöffnet ist.

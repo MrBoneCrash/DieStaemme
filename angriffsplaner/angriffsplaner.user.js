@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.5.2
+// @version      1.5.3
 // @description  Plant Fakes und Offs aus eigenen Beständen mit TWForge-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
-// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$)))/
-// @exclude      /^[^?]+\?(?:[^#]*&)?(screen)=[^#]*&\1=/
+// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
+// @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
 // @connect      twforge.net

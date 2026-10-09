@@ -1,14 +1,12 @@
 // ==UserScript==
 // @name         Die Stämme – Verteidigungsassistent
 // @namespace    local.die-staemme.verteidigungsassistent
-// @version      1.4.6
+// @version      1.4.7
 // @description  Gruppiert Eingehende, bewertet erklärbar das Risiko und plant manuell zu bestätigende Unterstützungen und Ausweichbefehle anhand der Weltdaten. Nutzung auf eigene Gefahr.
 // @author       Lokal
 // @match        https://*.die-staemme.de/game.php?*screen=overview_villages*mode=incomings*
 // @match        https://*.die-staemme.de/game.php?*mode=incomings*screen=overview_villages*
-// @match        https://*.die-staemme.de/game.php?*screen=map*
-// @match        https://*.die-staemme.de/game.php?*screen=place*
-// @exclude      /^[^?]+\?(?!(?:(?=(?:[^#]*&)?screen=(?:map|place)(?:&|#|$))|(?=(?:[^#]*&)?screen=overview_villages(?:&|#|$))(?=(?:[^#]*&)?mode=incomings(?:&|#|$))))/
+// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=overview_villages(?:&|#|$))(?=(?:[^#]*&)?mode=incomings(?:&|#|$)))/
 // @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
 // @grant        none
 // @run-at       document-idle
@@ -20,7 +18,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '1.4.6';
+    const VERSION = '1.4.7';
     const SCRIPT_ID = 'ds-defense-assistant';
     const STORAGE_VERSION = 1;
     const STORAGE_PREFIX = 'ds-defense-assistant';

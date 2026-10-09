@@ -4,7 +4,7 @@
 
 ## GitHub-Loader
 
-Tampermonkey startet diesen Loader über kurze `@match`-Einträge und exakte `@exclude`-Filter ausschließlich auf folgenden Seiten: **Versammlungsplatz**. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle. Die Ausschlussfilter verhindern ähnlich benannte Seiten oder Tabs und mehrdeutige doppelte Routing-Parameter.
+Tampermonkey startet diesen Loader über kurze `@match`-Einträge und exakte `@exclude`-Filter ausschließlich auf folgenden Seiten: **normale Planungsansicht des Versammlungsplatzes** (`screen=place`, ohne `try` oder `action`, mit fehlendem/leerem `mode` oder `mode=command`). Abschick-, Bestätigungs- und andere Unteransichten sind ausgeschlossen. Die Reihenfolge der URL-Parameter spielt dabei keine Rolle. Die Ausschlussfilter verhindern ähnlich benannte Seiten oder Tabs und mehrdeutige doppelte Routing-Parameter.
 
 In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
 
@@ -14,11 +14,11 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner (GitHub-Loader)
 // @namespace    local.die-staemme.loader.angriffsplaner
-// @version      1.0.2
+// @version      1.0.3
 // @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
-// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$)))/
-// @exclude      /^[^?]+\?(?:[^#]*&)?(screen)=[^#]*&\1=/
+// @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
+// @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
@@ -62,8 +62,8 @@ Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler st
 
 `angriffsplaner.user.js` ist ein eigenständiges Tampermonkey-Userscript. Es öffnet
 im **Versammlungsplatz** (`screen=place`) einen Planer im Design des Einzelziel-Snipe-Skripts.
-Er startet bei jedem Öffnen der Seite vollständig eingeklappt, auch bei der Rückkehr
-über den Browser-Verlauf. Auf anderen Spielseiten wird er nicht angezeigt.
+Er startet beim Öffnen der normalen Versammlungsplatzansicht vollständig eingeklappt, auch bei der Rückkehr
+über den Browser-Verlauf. Auf Abschick- und Bestätigungsseiten sowie in anderen Tabs und Spielseiten wird er nicht geladen.
 Welt, Spieler, Einheitenwerte, Laufzeiten, Fake-Mindestgröße und Nachtbonus werden
 aus der aktuellen deutschen Welt ermittelt. Das Skript erstellt einen Plan und
 einen DS-Util / DS-Workbench-Importcode. Es schickt keine Angriffe ab.
