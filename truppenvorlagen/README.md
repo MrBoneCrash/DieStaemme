@@ -60,6 +60,8 @@ Es öffnet kein Overlay. Die normale Rekrutierung kann über das Kontrollzentrum
 
 ## Kontrollzentrum: normale Rekrutierung
 
+Ohne aktives Kontrollzentrum bleibt die Bedienung eigenständig und manuell: **Fehlbestand eintragen** füllt die Felder, du klickst selbst auf **Rekrutieren**. Das Truppenskript erkennt keine Aktivitätschecks, hält aber jede gespeicherte Pause ein. Wird kein Kontrollzentrum erkannt, zeigt die normale Rekrutierung **Fortsetzen**, um die Pause global aufzuheben. Auch ein gespeicherter Rekrutierungsauftrag wird ohne aktives Kontrollzentrum auf derselben Seite nicht automatisch abgeschickt. Die Massenrekrutierung bleibt von diesem Pause-Ablauf ausgenommen.
+
 Im Konstruktionshelfer eine Bauvorlage laden und pro Dorf eine Truppenvorlage auf der normalen Rekrutierungsseite speichern/zuweisen. Das Kontrollzentrum erkennt die Truppenvorlagen beim ersten Besuch. Die Rekrutierungsautomatik ist für eine konfigurierte Vorlage zunächst an und lässt sich im Kontrollzentrum pro Dorf ausschalten.
 
 Der verfügbare Platz wird nach Abzug der Baureserve für alle noch offenen Schritte bis zum nächsten Bauernhof berechnet. Ein Bauernhofabschluss löst eine neue Kapazitätsprüfung aus; ansonsten wird stündlich geprüft. Das Kontrollzentrum übergibt konkrete Truppenzahlen. Hier werden diese auf aktuelle Fehlbestände einschließlich Rekrutierungswarteschlangen, Kosten, Rohstoffe, native Maximalmengen und verbleibende Baureserve begrenzt. Vor Eintragen und Abschicken wird jeweils zufällig 1–4 Sekunden gewartet. Änderungen an Vorlage, Ressourcen, Automatik, Eingaben oder Aktivitätscheck-Pause können den Auftrag noch vor dem Klick stoppen.

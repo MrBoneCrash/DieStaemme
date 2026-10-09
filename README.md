@@ -30,7 +30,7 @@ Das **Kontrollzentrum** verbindet **Konstruktionshelfer**, **Raubzug-Helfer** un
 ### Features
 
 - **Gemeinsame Steuerung:** Status und rote/grüne Automatikschalter für das aktuelle Dorf im Kontrollzentrum; Dorfdetails und eigene Schalter in den aufklappbaren Übersichten.
-- **Manuelle Aktivitätschecks:** Gemeinsame Pause über `BroadcastChannel` und `localStorage`. Den Check selbst durchführen und anschließend **Pause aufheben** wählen. Ein geöffneter Vollbildcheck bleibt frei zugänglich.
+- **Manuelle Aktivitätschecks:** Nur das Kontrollzentrum erkennt den Check und verteilt die Pause über `BroadcastChannel` und `localStorage`. Den Check selbst durchführen und anschließend **Pause aufheben** wählen. Ein geöffneter Vollbildcheck bleibt frei zugänglich.
 - **Bauen nach Vorlage:** Fortschrittsanzeige, Rohstoff- und Bauernhofprüfung sowie höchstens zwei Bauaufträge ohne beziehungsweise fünf mit Premium, ohne Extrakosten.
 - **Raubzüge nach Termin:** Wechsel zur nächsten Rückkehr oder abgeschlossenen Freischaltung. Ohne bekannten Termin erfolgt ein erneuter Check nach einer Minute.
 - **Rekrutierung mit Baureserve:** `freie Bauernhofkapazität − Platzbedarf offener Bauvorlagenschritte bis zum nächsten Bauernhof = Überschuss`. Nur finanzierbare, noch fehlende Truppen werden rekrutiert; bereits laufende Rekrutierungen zählen mit. Ohne weiteren Bauernhof wird die gesamte verbleibende Baufolge reserviert.
@@ -56,6 +56,8 @@ Das **Kontrollzentrum** verbindet **Konstruktionshelfer**, **Raubzug-Helfer** un
 Die Loader laden die auf GitHub veröffentlichte Version aus `master` bei jedem vollständigen Aufruf einer passenden Spielseite. Änderungen müssen dafür auf GitHub veröffentlicht sein; ein Neuladen übernimmt dann die aktuelle Version. Ohne erreichbares GitHub startet keine Ersatzversion. Browser können Timer in Hintergrundtabs verzögern.
 
 Weitere Skripte sind nicht an die gemeinsame Pause angebunden. **Nicht installiert** bedeutet, dass ein Helfer für das Dorf noch nicht erkannt wurde; Tampermonkeys Installationsliste kann das Kontrollzentrum nicht auslesen.
+
+**Eigenständige Nutzung:** Ohne aktives Kontrollzentrum funktionieren die Helfer separat. Bau- und Raubzugautomatik bleiben verfügbar; Truppenvorlagen trägt auf Wunsch die Fehlbestände ein, abgeschickt wird manuell. Die Helfer erkennen selbst keine Aktivitätschecks. Eine gespeicherte Pause bleibt auch ohne Kontrollzentrum wirksam. Sobald kein Kontrollzentrum erkannt wird, zeigt jeder integrierte Helfer **Fortsetzen**; der Klick hebt die Pause global für denselben Host, dieselbe Welt und denselben Spieler auf. Gespeicherte Rekrutierungsaufträge werden ohne aktives Kontrollzentrum auf derselben Seite nicht automatisch ausgeführt.
 
 ## Installation
 

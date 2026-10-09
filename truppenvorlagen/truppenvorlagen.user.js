@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Truppenvorlagen in der Rekrutierung
 // @namespace    local.die-staemme.truppenvorlagen
-// @version      0.4.1
+// @version      0.5.1
 // @description  Truppenvorlagen; normale Rekrutierung über Kontrollzentrum, Massenrekrutierung manuell.
 // @author       Lokal
 // @match        https://*.die-staemme.de/game.php?*screen=train*
@@ -90,6 +90,9 @@
 
     function createControlClient(env, name) {
         const { win, doc, storage, now = Date.now } = env;
+        const detector = env.controller === true, leases = new Map();
+        const leaseDuration = 90000, handoffDuration = 10000;
+        let closed = false, lastAnnouncement = -Infinity;
         const listeners = new Set(), requests = new Set();
         const tab = `${now()}-${Math.random().toString(36).slice(2)}`;
         let channel, channelKey, lastStatus = 'running', generation = 0, memory = null;
@@ -99,6 +102,25 @@
             const gd = data();
             return gd?.world && gd?.player?.id ? `ds-control:v1:${win.location?.host || env.host}:${gd.world}:${gd.player.id}` : null;
         };
+        function announceController(duration = leaseDuration) {
+            if (!detector || !key()) return;
+            const expiresAt = now() + duration;
+            leases.set(tab, expiresAt); lastAnnouncement = now();
+            try { storage.setItem(`${key()}:controller:${tab}`, String(expiresAt)); } catch { /* Broadcast fallback. */ }
+            try { channel?.postMessage({ type: 'controller', tab, expiresAt }); } catch { /* Storage fallback. */ }
+        }
+        function controllerActive() {
+            if (detector && !closed) return true;
+            if ([...leases.values()].some(expiresAt => expiresAt > now())) return true;
+            try {
+                const prefix = `${key()}:controller:`;
+                for (let i = 0; i < storage.length; i++) {
+                    const entry = storage.key(i);
+                    if (entry?.startsWith(prefix) && Number(storage.getItem(entry)) > now()) return true;
+                }
+            } catch { /* Locally received leases still apply. */ }
+            return false;
+        }
         function read() {
             try {
                 const raw = key() && storage.getItem(key());
@@ -130,6 +152,9 @@
                 if (win.BroadcastChannel) {
                     channel = new win.BroadcastChannel(current);
                     channel.onmessage = event => {
+                        if (event.data?.type === 'controller') {
+                            leases.set(event.data.tab, event.data.expiresAt); changed(); return;
+                        }
                         // Pause-Nachrichten sind auch bei nicht verfügbarem Storage wirksam.
                         if (event.data?.state?.status === 'pause') memory = event.data.state;
                         if (event.data?.state?.status === 'running') memory = null;
@@ -160,6 +185,8 @@
         }
         function inspect() {
             connect();
+            if (!detector || closed) { changed(); return null; }
+            if (now() - lastAnnouncement >= 1000) announceController();
             const check = activityCheck(doc, win);
             if (check) {
                 pause();
@@ -175,6 +202,7 @@
             if (paused() || expected !== generation) throw new Error('Kontrollzentrum: Skripte pausiert. Vorgang erneut starten.');
         }
         function resume() {
+            if (closed || (!detector && controllerActive())) return { ok: false, reason: 'Bitte die Pause im aktiven Kontrollzentrum aufheben.' };
             if (inspect()) return { ok: false, reason: 'Bitte zuerst den Aktivitätscheck manuell durchführen.' };
             try {
                 const prefix = `${key()}:check:`;
@@ -191,6 +219,22 @@
                 return { ok: false, reason: 'Pause konnte nicht dauerhaft aufgehoben werden.' };
             }
             return { ok: true };
+        }
+        function bindResume(button, errorElement) {
+            if (!button) return () => {};
+            const update = () => {
+                button.hidden = read().status !== 'pause' || controllerActive();
+                if (errorElement) errorElement.hidden = button.hidden || !errorElement.textContent;
+            };
+            button.addEventListener('click', () => {
+                const result = resume();
+                if (errorElement) errorElement.textContent = result.ok ? '' : result.reason;
+                update();
+            });
+            listeners.add(update); update();
+            const timer = win.setInterval?.(update, 1000);
+            win.addEventListener?.('pagehide', () => { if (timer !== undefined) win.clearInterval?.(timer); });
+            return update;
         }
         async function request(url, options = {}) {
             assert();
@@ -305,14 +349,18 @@
         }
         win.addEventListener?.('storage', event => {
             if (event.key === key()) { memory = null; changed(); }
+            else if (event.key?.startsWith(`${key()}:controller:`)) changed();
         });
         win.addEventListener?.('pagehide', () => {
+            // Preserve pause across navigation while the next page's loader starts.
+            if (detector) { closed = true; announceController(handoffDuration); }
             try { if (key()) storage.removeItem(`${key()}:check:${tab}`); } catch { /* Optional. */ }
             channel?.close();
             for (const request of requests) request.abort();
         });
-        connect(); changed();
+        connect(); if (detector) announceController(); changed();
         return { inspect, paused, assert, resume, state: read, fetch: request,
+            controllerActive, ownsControl: () => detector && !closed, bindResume,
             registerScript, scriptState, scriptVillages, setScriptAuto,
             forgetScript(id, villageId) { if (knownScripts.includes(id)) storage.removeItem(scriptKey(id, villageId)); },
             scope: key,
@@ -327,7 +375,7 @@
     }
     // CONTROL-CLIENT-END
 
-    const VERSION = '0.4.1';
+    const VERSION = '0.5.1';
     const SCRIPT_ID = 'ds-troop-templates';
     const STORAGE_VERSION = 1;
     const STORAGE_PREFIX = 'ds-troop-templates';
@@ -634,6 +682,12 @@
         const autoKey = `${scope}:recruit-auto:${villageId}`, commandKey = `${scope}:recruit-command:${villageId}`;
         let activeCommand = null, revision = 0, participant;
         const enabled = () => window.localStorage.getItem(autoKey) !== 'false';
+        const updateResume = dsControl.bindResume(document.querySelector(`#${SCRIPT_ID}-panel [data-resume]`), document.querySelector(`#${SCRIPT_ID}-panel [data-resume-error]`));
+        const center = () => gamePage.DSControlCenter?.isActive?.() &&
+            typeof gamePage.DSControlCenter.planRecruitmentNow === 'function' ? gamePage.DSControlCenter : null;
+        function requireCenter() {
+            if (!center()) throw new Error('Kontrollzentrum nicht aktiv. Kein automatischer Rekrutierungsauftrag.');
+        }
         function snapshot() {
             const context = state.contexts[0], form = document.querySelector('#train_form');
             const stored = loadStore(), templateId = stored.villageTemplateIds[villageId];
@@ -664,7 +718,7 @@
         }
         const wait = ms => new Promise(resolve => window.setTimeout(resolve, ms));
         async function process() {
-            if (activeCommand || dsControl.paused()) return;
+            if (activeCommand || !center() || dsControl.paused()) return;
             if (!window.navigator.locks?.request) {
                 const command = readCommand();
                 if (command?.status === 'queued') finish(command, 'failed', 'Browser unterstützt keine sichere Tab-Sperre.');
@@ -674,7 +728,7 @@
         }
         async function execute() {
             const command = readCommand();
-            if (!command || activeCommand || !['queued', 'processing', 'submitted'].includes(command.status) || dsControl.paused()) return;
+            if (!command || activeCommand || !center() || !['queued', 'processing', 'submitted'].includes(command.status) || dsControl.paused()) return;
             if (['action', 'try', 'ajax', 'ajaxaction'].some(k => search.has(k))) return;
             if (command.villageId !== villageId || command.scope !== scope || command.issuedAt > Date.now() || Date.now() - command.issuedAt > 600000) {
                 finish(command, 'failed', 'Rekrutierungsbefehl ungültig oder abgelaufen.'); return;
@@ -688,6 +742,7 @@
                     const token = dsControl.token();
                     await wait(1000 + Math.floor(Math.random() * 3001));
                     dsControl.assert(token);
+                    requireCenter();
                     if (started !== revision || !enabled()) throw new Error('Rekrutierung durch Pause oder Automatikänderung angehalten.');
                     refreshIntegration(true);
                     const live = snapshot();
@@ -696,7 +751,7 @@
                     if (!Number.isSafeInteger(command.reservedPop) || command.reservedPop < 0 || !Number.isSafeInteger(command.surplus) || command.surplus <= 0) throw new Error('Baureserve oder Überschuss fehlt.');
                     const budget = { ...live.budget, pop: Math.max(0, Math.min(command.surplus, live.budget.pop - command.reservedPop)) };
                     const validItems = live.items.filter(item => !item.disabled);
-                    if (gamePage.DSControlCenter?.planRecruitmentNow) command.units = gamePage.DSControlCenter.planRecruitmentNow(villageId, { ...live, items: validItems }, command.id);
+                    command.units = center().planRecruitmentNow(villageId, { ...live, items: validItems }, command.id);
                     const requested = validItems.filter(item => item.cost && Number.isFinite(item.max)).map(item => ({ ...item,
                         deficit: Math.min(item.deficit, Number.isSafeInteger(command.units[item.unit]) && command.units[item.unit] > 0 ? command.units[item.unit] : 0) }));
                     const units = calculatePlan(requested, true, budget);
@@ -711,6 +766,7 @@
                     await wait(1000 + Math.floor(Math.random() * 3001));
                     dsControl.assert(token);
                     if (started !== revision || !enabled()) throw new Error('Rekrutierung vor dem Abschicken angehalten.');
+                    requireCenter();
                     if ([...entries.values()].some(entry => !entry.input.isConnected || Number(entry.input.value || 0) !== (units[entry.unit] || 0)))
                         throw new Error('Rekrutierungsfelder vor dem Abschicken geändert.');
                     // Native maxima (and cost previews) may already subtract the entered order.
@@ -744,6 +800,7 @@
                     command.spentPop = requested.reduce((sum, item) => sum + (units[item.unit] || 0) * item.cost.pop, 0);
                     command.status = 'submitted'; command.submittedAt = Date.now();
                     saveCommand(command); // Persist before native submit; never repeat after navigation.
+                    requireCenter();
                     dsControl.click(submit);
                 }
                 for (let i = 0; i < 60; i++) {
@@ -769,7 +826,7 @@
             setAuto(value) { revision++; window.localStorage.setItem(autoKey, String(value)); }
         });
         dsControl.onChange(() => { revision++; if (!dsControl.paused()) void process(); });
-        const timer = window.setInterval(() => { participant.publish(); void process(); }, 1000);
+        const timer = window.setInterval(() => { updateResume(); participant.publish(); void process(); }, 1000);
         window.addEventListener('pagehide', () => { revision++; window.clearInterval(timer); });
         void process();
     }
@@ -1333,6 +1390,8 @@
             'Leert die Felder der einbezogenen Dörfer'
         );
         actionCell.append(state.applyButton, clearButton);
+        if (mode === 'train') actionCell.append(element('button', { type: 'button', 'data-resume': '', textContent: 'Fortsetzen', hidden: true }),
+            element('span', { 'data-resume-error': '', role: 'status', hidden: true }));
 
         state.statusElement = element('span', { className: 'ds-tt-panel-status', 'aria-live': 'polite' });
         actionCell.append(state.statusElement);

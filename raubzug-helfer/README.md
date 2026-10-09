@@ -50,6 +50,8 @@ Der Spieltab muss geöffnet bleiben. Ein geschlossener Browser führt keine Akti
 
 ## Kontrollzentrum
 
+Der Helfer bleibt ohne Kontrollzentrum einschließlich seiner Raubzugautomatik eigenständig nutzbar. Nur das Kontrollzentrum erkennt Aktivitätschecks und sendet die gemeinsame Pause. Eine gespeicherte Pause wird immer eingehalten. Wird kein Kontrollzentrum erkannt, erscheint **Fortsetzen**, um die Pause global aufzuheben; bei aktivem Kontrollzentrum erfolgt die Freigabe dort.
+
 Das aktualisierte Kontrollzentrum und der aktualisierte Konstruktionshelfer können diese Automatik gemeinsam steuern. Der Raubzug-Helfer meldet Status, Automatikzustand, nächsten Prüftermin und den abgeschlossenen Lauf. Der zusätzliche rote/grüne Automatikbutton im Kontrollzentrum steuert dieselbe Einstellung wie **Automatisch abschicken**.
 
 Bei einem Aktivitätscheck wird die laufende Berechnung abgebrochen und es werden keine weiteren Abschick-, Freischalt- oder Reload-Aktionen ausgelöst. Die Automatik bleibt gespeichert und startet erst nach manueller Freigabe im Kontrollzentrum mit einer neuen Prüfung.
@@ -85,7 +87,7 @@ Die Berechnung läuft in einem Web Worker, damit die Einstellungen bedienbar ble
 
 ## Spielintegration und Prüfung
 
-Das Skript verwendet die normalen kostenlosen Abschick- und Freischaltbuttons. Eine Browser-Tab-Sperre und gespeicherte Rückkehrzeiten verhindern parallele Verarbeitung desselben Dorfes durch mehrere Helfertabs. Sichtbare Aktivitätschecks und eine gespeicherte Pause des Kontrollzentrums halten Aktionen an.
+Das Skript verwendet die normalen kostenlosen Abschick- und Freischaltbuttons. Eine Browser-Tab-Sperre und gespeicherte Rückkehrzeiten verhindern parallele Verarbeitung desselben Dorfes durch mehrere Helfertabs. Eine gespeicherte Pause hält weitere Aktionen unabhängig von der Anwesenheit des Kontrollzentrums an.
 
 Die lokalen Tests in `test/raubzug-helfer.core.test.cjs` vergleichen kleine gemischte Bestände mit vollständiger Enumeration und prüfen Mindestmengen, Bestandsgrenzen, Zeitgrenzen, Weltdaten und Berliner Zeitumstellungen. `test/raubzug-helfer.browser.cjs` prüft auf simulierten Seiten Worker, native Buttons, Speicher und Desktop-/Mobilansicht. Ein echter eingeloggter Spieltab war während der Entwicklung nicht verfügbar; die aktuelle Spielintegration ist daher noch nicht am Liveaccount bestätigt. Fehlende oder nicht erkannte Spieldaten führen zum Abbruch statt zu geratenen Truppenkombinationen.
 

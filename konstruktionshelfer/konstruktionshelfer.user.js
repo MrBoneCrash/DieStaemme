@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Konstruktionshelfer
 // @namespace    local.die-staemme.konstruktionshelfer
-// @version      1.4.0
+// @version      1.5.1
 // @description  Lädt Bauvorlagen und reiht Ausbauten manuell oder automatisch mit Rohstoff-, Bauernhof- und Warteschlangenprüfung ein. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=main*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=main(?:&|#|$))(?!(?:[^#]*&)?(?:try|action|ajax|ajaxaction)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:build)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -87,6 +87,9 @@
 
     function createControlClient(env, name) {
         const { win, doc, storage, now = Date.now } = env;
+        const detector = env.controller === true, leases = new Map();
+        const leaseDuration = 90000, handoffDuration = 10000;
+        let closed = false, lastAnnouncement = -Infinity;
         const listeners = new Set(), requests = new Set();
         const tab = `${now()}-${Math.random().toString(36).slice(2)}`;
         let channel, channelKey, lastStatus = 'running', generation = 0, memory = null;
@@ -96,6 +99,25 @@
             const gd = data();
             return gd?.world && gd?.player?.id ? `ds-control:v1:${win.location?.host || env.host}:${gd.world}:${gd.player.id}` : null;
         };
+        function announceController(duration = leaseDuration) {
+            if (!detector || !key()) return;
+            const expiresAt = now() + duration;
+            leases.set(tab, expiresAt); lastAnnouncement = now();
+            try { storage.setItem(`${key()}:controller:${tab}`, String(expiresAt)); } catch { /* Broadcast fallback. */ }
+            try { channel?.postMessage({ type: 'controller', tab, expiresAt }); } catch { /* Storage fallback. */ }
+        }
+        function controllerActive() {
+            if (detector && !closed) return true;
+            if ([...leases.values()].some(expiresAt => expiresAt > now())) return true;
+            try {
+                const prefix = `${key()}:controller:`;
+                for (let i = 0; i < storage.length; i++) {
+                    const entry = storage.key(i);
+                    if (entry?.startsWith(prefix) && Number(storage.getItem(entry)) > now()) return true;
+                }
+            } catch { /* Locally received leases still apply. */ }
+            return false;
+        }
         function read() {
             try {
                 const raw = key() && storage.getItem(key());
@@ -127,6 +149,9 @@
                 if (win.BroadcastChannel) {
                     channel = new win.BroadcastChannel(current);
                     channel.onmessage = event => {
+                        if (event.data?.type === 'controller') {
+                            leases.set(event.data.tab, event.data.expiresAt); changed(); return;
+                        }
                         // Pause-Nachrichten sind auch bei nicht verfügbarem Storage wirksam.
                         if (event.data?.state?.status === 'pause') memory = event.data.state;
                         if (event.data?.state?.status === 'running') memory = null;
@@ -157,6 +182,8 @@
         }
         function inspect() {
             connect();
+            if (!detector || closed) { changed(); return null; }
+            if (now() - lastAnnouncement >= 1000) announceController();
             const check = activityCheck(doc, win);
             if (check) {
                 pause();
@@ -172,6 +199,7 @@
             if (paused() || expected !== generation) throw new Error('Kontrollzentrum: Skripte pausiert. Vorgang erneut starten.');
         }
         function resume() {
+            if (closed || (!detector && controllerActive())) return { ok: false, reason: 'Bitte die Pause im aktiven Kontrollzentrum aufheben.' };
             if (inspect()) return { ok: false, reason: 'Bitte zuerst den Aktivitätscheck manuell durchführen.' };
             try {
                 const prefix = `${key()}:check:`;
@@ -188,6 +216,22 @@
                 return { ok: false, reason: 'Pause konnte nicht dauerhaft aufgehoben werden.' };
             }
             return { ok: true };
+        }
+        function bindResume(button, errorElement) {
+            if (!button) return () => {};
+            const update = () => {
+                button.hidden = read().status !== 'pause' || controllerActive();
+                if (errorElement) errorElement.hidden = button.hidden || !errorElement.textContent;
+            };
+            button.addEventListener('click', () => {
+                const result = resume();
+                if (errorElement) errorElement.textContent = result.ok ? '' : result.reason;
+                update();
+            });
+            listeners.add(update); update();
+            const timer = win.setInterval?.(update, 1000);
+            win.addEventListener?.('pagehide', () => { if (timer !== undefined) win.clearInterval?.(timer); });
+            return update;
         }
         async function request(url, options = {}) {
             assert();
@@ -302,14 +346,18 @@
         }
         win.addEventListener?.('storage', event => {
             if (event.key === key()) { memory = null; changed(); }
+            else if (event.key?.startsWith(`${key()}:controller:`)) changed();
         });
         win.addEventListener?.('pagehide', () => {
+            // Preserve pause across navigation while the next page's loader starts.
+            if (detector) { closed = true; announceController(handoffDuration); }
             try { if (key()) storage.removeItem(`${key()}:check:${tab}`); } catch { /* Optional. */ }
             channel?.close();
             for (const request of requests) request.abort();
         });
-        connect(); changed();
+        connect(); if (detector) announceController(); changed();
         return { inspect, paused, assert, resume, state: read, fetch: request,
+            controllerActive, ownsControl: () => detector && !closed, bindResume,
             registerScript, scriptState, scriptVillages, setScriptAuto,
             forgetScript(id, villageId) { if (knownScripts.includes(id)) storage.removeItem(scriptKey(id, villageId)); },
             scope: key,
@@ -638,7 +686,8 @@
             <div class="ds-actions"><button type="button" data-load>Vorlage laden</button><button type="button" data-refresh>Vorschlag aktualisieren</button></div>
             <div data-info class="ds-hint"></div><div data-result aria-live="polite">Noch keine Vorlage geladen.</div>
             <div class="ds-actions"><button type="button" class="ds-primary" data-build disabled>In Warteschlange einreihen</button>
-                <button type="button" data-auto aria-pressed="false">Automatisch einreihen: Aus</button></div>
+                <button type="button" data-auto aria-pressed="false">Automatisch einreihen: Aus</button>
+                <button type="button" data-resume hidden>Fortsetzen</button></div><span data-resume-error hidden role="status"></span>
             <div data-auto-info class="ds-hint">Automatik ausgeschaltet.</div>
             <div data-status role="status">Bereit.</div><details><summary>Baufolge</summary><ol data-steps></ol></details>
             <p class="ds-hint">Nutzung auf eigene Gefahr. Vor jedem Bau den Vorschlag prüfen.</p>
@@ -657,9 +706,10 @@
         }
         mount();
         const $ = s => root.querySelector(s);
+        const updateResume = dsControl.bindResume($('[data-resume]'), $('[data-resume-error]'));
         function status(message, error = false) {
             const paused = dsControl.state().status === 'pause';
-            $('[data-status]').textContent = paused ? 'Kontrollzentrum: Skripte pausiert. Freigabe erfolgt im Kontrollzentrum.' : message;
+            $('[data-status]').textContent = paused ? `Skripte pausiert. ${dsControl.controllerActive() ? 'Freigabe erfolgt im Kontrollzentrum.' : 'Mit Fortsetzen die gemeinsame Pause aufheben.'}` : message;
             $('[data-status]').dataset.tone = paused ? '' : error ? 'error' : '';
             participant?.publish();
         }
@@ -679,6 +729,7 @@
         }
         function signature(p) { return JSON.stringify([p.building, p.level, p.index, p.count, p.premium, p.costs]); }
         function refresh() {
+            updateResume();
             $('[data-build]').disabled = true;
             const paused = dsControl.paused();
             $('[data-auto]').disabled = paused;
@@ -965,7 +1016,7 @@
         catch { setAuto(false, false); }
         if (!dsControl.paused() && quests.needsPopup()) void quests.handlePopup().then(refresh).catch(e => status(e.message, true));
         participant = dsControl.registerScript('konstruktionshelfer', {
-            version: '1.4.0',
+            version: '1.5.1',
             state: () => ({ auto: auto.enabled || suspendedAuto, busy: busy || quests.busy || !!page.BuildingMain.pending || !!questPopup(),
                 status: $('[data-status]').textContent, nextAt: autoNext, construction: constructionState() }),
             setAuto(enabled) {
@@ -981,6 +1032,6 @@
         return true;
     }
     if (!initialize()) {
-        const startup = dsControl.interval(() => { if (initialize()) clearInterval(startup); }, 250);
+        const startup = setInterval(() => { if (initialize()) clearInterval(startup); }, 250);
     }
 })();

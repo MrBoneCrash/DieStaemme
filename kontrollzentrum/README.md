@@ -2,6 +2,10 @@
 
 Das Kontrollzentrum pausiert die eingebundenen Userscripts, sobald ein Aktivitätscheck erkannt wird. Den Check führst du selbst durch. Anschließend hebst du die Pause ausdrücklich auf.
 
+Nur das Kontrollzentrum erkennt Aktivitätschecks und setzt die gemeinsame Pause. Die Helfer empfangen den Zustand, prüfen selbst aber keine Checks. Ohne aktives Kontrollzentrum bleiben Bau- und Raubzugautomatik eigenständig nutzbar; Truppenvorlagen wird manuell bedient. Eine bestehende Pause muss ausdrücklich aufgehoben werden. Automatische Rekrutierungsaufträge erfordern ein aktives Kontrollzentrum auf derselben Spielseite.
+
+Eine gespeicherte Pause bleibt unabhängig von der Anwesenheit des Kontrollzentrums wirksam und wird niemals durch Zeitablauf aufgehoben. Die Präsenzmeldung steuert ausschließlich die Anzeige von **Fortsetzen** in den drei integrierten Helfern: Nach Verlassen einer Kontrollzentrum-Seite gilt sie noch zehn Sekunden, bei einem abrupten Ausfall höchstens 90 Sekunden seit der letzten Meldung. Ist kein Kontrollzentrum mehr erkannt, erscheint der Button. Der Klick hebt die Pause über Broadcast und lokalen Speicher global für denselben Host, dieselbe Welt und denselben Spieler auf. Ist ein Kontrollzentrum aktiv, erfolgt die Freigabe dort. Die Helfer prüfen beim manuellen Fortsetzen selbst keinen Aktivitätscheck; der Nutzer muss diesen vorher durchgeführt haben.
+
 ## Installation
 
 Den vollständigen Inhalt von [kontrollzentrum.user.js](kontrollzentrum.user.js) als neues Skript in Tampermonkey speichern. Außerdem Konstruktionshelfer, Raubzug-Helfer und Truppenvorlagen auf die angebundenen Versionen aktualisieren. Bereits geöffnete Spieltabs danach neu laden. Andere Skripte reagieren nicht auf diese Pause; die Massenrekrutierung bleibt manuell.

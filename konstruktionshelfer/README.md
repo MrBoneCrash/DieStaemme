@@ -38,6 +38,8 @@ Für Updates die passende Spielseite neu laden. Ohne erreichbares GitHub startet
 
 ## Installation und Bedienung
 
+Der Helfer bleibt ohne Kontrollzentrum einschließlich seiner Bauautomatik eigenständig nutzbar. Er erkennt selbst keine Aktivitätschecks, hält aber jede gespeicherte Pause ein. Wird kein Kontrollzentrum erkannt, erscheint **Fortsetzen**, um die Pause global aufzuheben; bei aktivem Kontrollzentrum erfolgt die Freigabe dort.
+
 1. Den Loader oben oder den vollständigen Inhalt von `konstruktionshelfer.user.js` als neues Tampermonkey-Skript speichern.
 2. Das **Hauptgebäude** öffnen und die zunächst eingeklappte Leiste **Konstruktionshelfer** aufklappen.
 3. Den Exportcode einer Konstruktionsmanager-Vorlage einfügen und **Vorlage laden** anklicken. Der im Auftrag mitgelieferte Beispielcode liegt in [tests/vorlage.txt](tests/vorlage.txt); er heißt `W256_Deff_AG_End` und enthält 287 Bauschritte.
@@ -90,7 +92,7 @@ Er meldet außerdem seinen Automatikzustand und laufende Arbeit an das Kontrollz
 
 Für die normale Rekrutierung meldet er zusätzlich die geladene Baufolge, wirksame Gebäudestufen und Bevölkerungskosten. Ein tatsächlicher Bauernhofabschluss löst ein Kapazitätssignal aus, auch wenn die Bauansicht per AJAX aktualisiert wird. Das Kontrollzentrum reserviert den Platz für offene Schritte bis zum nächsten Bauernhof und übergibt nur den Überschuss an die Truppenvorlagen. Bis zum Ende laufender Bau-/Questaktionen wird gewartet; ohne Bauernhofsignal prüft das Kontrollzentrum stündlich.
 
-Die gespeicherte Einstellung **An/Aus** bleibt erhalten, auch nach einem Reload während der Pause. Erst nach **Pause aufheben** im Kontrollzentrum werden aktuelle Gebäude, Rohstoffe, Warteschlange und Quests neu geprüft. War die Automatik vorher eingeschaltet, beginnt ein neuer Prüflauf; war sie ausgeschaltet, bleibt sie ausgeschaltet. Unterbrochene manuelle Bauversuche werden nicht wiederholt. Der Helfer kann die globale Pause selbst nicht aufheben.
+Die gespeicherte Einstellung **An/Aus** bleibt erhalten, auch nach einem Reload während der Pause. Nach **Pause aufheben** im Kontrollzentrum oder **Fortsetzen** bei fehlendem Kontrollzentrum werden aktuelle Gebäude, Rohstoffe, Warteschlange und Quests neu geprüft. War die Automatik vorher eingeschaltet, beginnt ein neuer Prüflauf; war sie ausgeschaltet, bleibt sie ausgeschaltet. Unterbrochene manuelle Bauversuche werden nicht wiederholt.
 
 ## Vorlagenformat und Grenzen
 

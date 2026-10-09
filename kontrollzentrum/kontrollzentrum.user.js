@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Kontrollzentrum
 // @namespace    local.die-staemme.kontrollzentrum
-// @version      1.4.1
+// @version      1.5.1
 // @description  Pausiert eingebundene Skripte bei Aktivitätschecks und erlaubt anschließend die manuelle Freigabe.
 // @match        https://*.die-staemme.de/game.php*
 // @grant        unsafeWindow
@@ -84,6 +84,9 @@
 
     function createControlClient(env, name) {
         const { win, doc, storage, now = Date.now } = env;
+        const detector = env.controller === true, leases = new Map();
+        const leaseDuration = 90000, handoffDuration = 10000;
+        let closed = false, lastAnnouncement = -Infinity;
         const listeners = new Set(), requests = new Set();
         const tab = `${now()}-${Math.random().toString(36).slice(2)}`;
         let channel, channelKey, lastStatus = 'running', generation = 0, memory = null;
@@ -93,6 +96,25 @@
             const gd = data();
             return gd?.world && gd?.player?.id ? `ds-control:v1:${win.location?.host || env.host}:${gd.world}:${gd.player.id}` : null;
         };
+        function announceController(duration = leaseDuration) {
+            if (!detector || !key()) return;
+            const expiresAt = now() + duration;
+            leases.set(tab, expiresAt); lastAnnouncement = now();
+            try { storage.setItem(`${key()}:controller:${tab}`, String(expiresAt)); } catch { /* Broadcast fallback. */ }
+            try { channel?.postMessage({ type: 'controller', tab, expiresAt }); } catch { /* Storage fallback. */ }
+        }
+        function controllerActive() {
+            if (detector && !closed) return true;
+            if ([...leases.values()].some(expiresAt => expiresAt > now())) return true;
+            try {
+                const prefix = `${key()}:controller:`;
+                for (let i = 0; i < storage.length; i++) {
+                    const entry = storage.key(i);
+                    if (entry?.startsWith(prefix) && Number(storage.getItem(entry)) > now()) return true;
+                }
+            } catch { /* Locally received leases still apply. */ }
+            return false;
+        }
         function read() {
             try {
                 const raw = key() && storage.getItem(key());
@@ -124,6 +146,9 @@
                 if (win.BroadcastChannel) {
                     channel = new win.BroadcastChannel(current);
                     channel.onmessage = event => {
+                        if (event.data?.type === 'controller') {
+                            leases.set(event.data.tab, event.data.expiresAt); changed(); return;
+                        }
                         // Pause-Nachrichten sind auch bei nicht verfügbarem Storage wirksam.
                         if (event.data?.state?.status === 'pause') memory = event.data.state;
                         if (event.data?.state?.status === 'running') memory = null;
@@ -154,6 +179,8 @@
         }
         function inspect() {
             connect();
+            if (!detector || closed) { changed(); return null; }
+            if (now() - lastAnnouncement >= 1000) announceController();
             const check = activityCheck(doc, win);
             if (check) {
                 pause();
@@ -169,6 +196,7 @@
             if (paused() || expected !== generation) throw new Error('Kontrollzentrum: Skripte pausiert. Vorgang erneut starten.');
         }
         function resume() {
+            if (closed || (!detector && controllerActive())) return { ok: false, reason: 'Bitte die Pause im aktiven Kontrollzentrum aufheben.' };
             if (inspect()) return { ok: false, reason: 'Bitte zuerst den Aktivitätscheck manuell durchführen.' };
             try {
                 const prefix = `${key()}:check:`;
@@ -185,6 +213,22 @@
                 return { ok: false, reason: 'Pause konnte nicht dauerhaft aufgehoben werden.' };
             }
             return { ok: true };
+        }
+        function bindResume(button, errorElement) {
+            if (!button) return () => {};
+            const update = () => {
+                button.hidden = read().status !== 'pause' || controllerActive();
+                if (errorElement) errorElement.hidden = button.hidden || !errorElement.textContent;
+            };
+            button.addEventListener('click', () => {
+                const result = resume();
+                if (errorElement) errorElement.textContent = result.ok ? '' : result.reason;
+                update();
+            });
+            listeners.add(update); update();
+            const timer = win.setInterval?.(update, 1000);
+            win.addEventListener?.('pagehide', () => { if (timer !== undefined) win.clearInterval?.(timer); });
+            return update;
         }
         async function request(url, options = {}) {
             assert();
@@ -299,14 +343,18 @@
         }
         win.addEventListener?.('storage', event => {
             if (event.key === key()) { memory = null; changed(); }
+            else if (event.key?.startsWith(`${key()}:controller:`)) changed();
         });
         win.addEventListener?.('pagehide', () => {
+            // Preserve pause across navigation while the next page's loader starts.
+            if (detector) { closed = true; announceController(handoffDuration); }
             try { if (key()) storage.removeItem(`${key()}:check:${tab}`); } catch { /* Optional. */ }
             channel?.close();
             for (const request of requests) request.abort();
         });
-        connect(); changed();
+        connect(); if (detector) announceController(); changed();
         return { inspect, paused, assert, resume, state: read, fetch: request,
+            controllerActive, ownsControl: () => detector && !closed, bindResume,
             registerScript, scriptState, scriptVillages, setScriptAuto,
             forgetScript(id, villageId) { if (knownScripts.includes(id)) storage.removeItem(scriptKey(id, villageId)); },
             scope: key,
@@ -376,9 +424,9 @@
     if (typeof module === 'object' && module.exports) { module.exports = { activityCheck, createControlClient, constructionSurplus, recruitmentPlan, decideControlRoute, orderRaidVillages, decideVillageRoute }; return; }
     const page = typeof unsafeWindow === 'undefined' ? window : unsafeWindow;
     if (window.top !== window.self || page.DSControlCenter || document.getElementById('ds-kontrollzentrum')) return;
-    const control = createControlClient({ win: window, doc: document, storage: localStorage }, 'Kontrollzentrum');
+    const control = createControlClient({ win: window, doc: document, storage: localStorage, controller: true }, 'Kontrollzentrum');
     page.DSControlCenter = Object.freeze({
-        version: '1.4.1', isPaused: control.paused, assertActive: control.assert, beforeReload,
+        version: '1.5.1', isActive: control.ownsControl, isPaused: control.paused, assertActive: control.assert, beforeReload,
         state: control.state, onChange: control.onChange,
         farmCompleted(villageId) {
             const check = readRecruit('check', String(villageId));
