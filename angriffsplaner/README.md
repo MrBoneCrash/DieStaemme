@@ -2,6 +2,60 @@
 
 > **Warnhinweis: Die Nutzung erfolgt auf eigene Gefahr.** Prüfe vor dem Einsatz die aktuellen Spielregeln und alle vorgeschlagenen Aktionen. Fehler können zu Verlusten im Spiel oder zu Kontosanktionen führen.
 
+## GitHub-Loader
+
+In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
+
+Bei jedem vollständigen Seitenaufruf wird die aktuelle auf GitHub veröffentlichte Version aus `master` geladen. Für ein Update eine bereits geöffnete Spielseite neu laden. GitHubs Bereitstellung kann kurz verzögert sein.
+
+```javascript
+// ==UserScript==
+// @name         Die Stämme – Angriffsplaner (GitHub-Loader)
+// @namespace    local.die-staemme.loader.angriffsplaner
+// @version      1.0.0
+// @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
+// @match        https://*.die-staemme.de/game.php*
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @connect      raw.githubusercontent.com
+// @connect      twforge.net
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
+
+// Warnhinweis: Die Nutzung erfolgt auf eigene Gefahr.
+(() => {
+    const url = 'https://raw.githubusercontent.com/MrBoneCrash/DieStaemme/master/angriffsplaner/angriffsplaner.user.js';
+    const fail = error => console.error('[Angriffsplaner] Laden fehlgeschlagen:', error);
+    GM_xmlhttpRequest({
+        method: 'GET',
+        url: `${url}?t=${Date.now()}`,
+        nocache: true,
+        anonymous: true,
+        timeout: 20000,
+        onload(response) {
+            if (response.status !== 200) {
+                fail(`HTTP ${response.status}`);
+                return;
+            }
+            try {
+                new Function('window', 'unsafeWindow', 'game_data', 'GM_xmlhttpRequest',
+                    response.responseText)(unsafeWindow, unsafeWindow,
+                    unsafeWindow.game_data, GM_xmlhttpRequest);
+            } catch (error) {
+                fail(error);
+            }
+        },
+        onerror: () => fail('Netzwerkfehler'),
+        ontimeout: () => fail('Zeitüberschreitung')
+    });
+})();
+```
+
+Die Anfrageberechtigung für `raw.githubusercontent.com` lädt die Datei; `twforge.net` wird für TWForge-Berichte benötigt. Erlaube diese Domains, wenn Tampermonkey danach fragt.
+
+Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler stehen in der Browserkonsole. **Die Nutzung erfolgt auf eigene Gefahr; auch zukünftige Änderungen aus `master` werden automatisch ausgeführt.**
+
 `angriffsplaner.user.js` ist ein eigenständiges Tampermonkey-Userscript. Es öffnet
 im **Versammlungsplatz** (`screen=place`) einen Planer im Design des Einzelziel-Snipe-Skripts.
 Er startet bei jedem Öffnen der Seite vollständig eingeklappt, auch bei der Rückkehr

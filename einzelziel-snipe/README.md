@@ -2,6 +2,44 @@
 
 > **Warnhinweis: Die Nutzung erfolgt auf eigene Gefahr.** Prüfe vor dem Einsatz die aktuellen Spielregeln und alle vorgeschlagenen Aktionen. Fehler können zu Verlusten im Spiel oder zu Kontosanktionen führen.
 
+## GitHub-Loader
+
+In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
+
+Auf der Dorfinfo und beim Öffnen eines vom Planer vorbereiteten Versammlungsplatzes wird die aktuelle auf GitHub veröffentlichte Version aus `master` geladen. Für ein Update eine bereits geöffnete Spielseite neu laden. GitHubs Bereitstellung kann kurz verzögert sein.
+
+```javascript
+// ==UserScript==
+// @name         Die Stämme – Einzelziel-Snipe (GitHub-Loader)
+// @namespace    local.die-staemme.loader.einzelziel-snipe
+// @version      1.1.0
+// @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
+// @match        https://*.die-staemme.de/game.php*
+// @grant        none
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
+
+// Warnhinweis: Die Nutzung erfolgt auf eigene Gefahr.
+(() => {
+    const parameters = new URL(location.href).searchParams;
+    const villageInfo = parameters.get('screen') === 'info_village' && /^[1-9]\d*$/.test(parameters.get('id') || '');
+    const preparedCommand = parameters.get('screen') === 'place' && !parameters.has('try') &&
+        ['', 'command'].includes(parameters.get('mode') || '') && ['support', 'attack'].includes(parameters.get('ds_snipe_command'));
+    if (!villageInfo && !preparedCommand) return;
+    const url = 'https://raw.githubusercontent.com/MrBoneCrash/DieStaemme/master/einzelziel-snipe/einzelziel-snipe.user.js';
+    fetch(`${url}?t=${Date.now()}`, { cache: 'no-store', credentials: 'omit' })
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.text();
+        })
+        .then(code => new Function(code)())
+        .catch(error => console.error('[Einzelziel-Snipe] Laden fehlgeschlagen:', error));
+})();
+```
+
+Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler stehen in der Browserkonsole. **Die Nutzung erfolgt auf eigene Gefahr; auch zukünftige Änderungen aus `master` werden automatisch ausgeführt.**
+
 `einzelziel-snipe.user.js` ist eine eigenständige deutsche Neuimplementierung von
 [Single Village Snipe v1.0.0](https://cdn.jsdelivr.net/gh/Marcel2511/tribal-wars-schnellleisten-skripte@v1.0.0/SingleVillageSnipedFixed.js)
 von Marcel Wollbaum, ursprünglich nach RedAlert.
@@ -13,6 +51,12 @@ von Marcel Wollbaum, ursprünglich nach RedAlert.
 3. Das Skript erscheint oberhalb der Dorfinfo. Für die kombinierte Truppenübersicht
    wird wie beim Original ein Premium-Account benötigt.
 
+Der Planer erscheint ausschließlich in der vollständigen Dorfinfo, die über die
+Karte geöffnet wird. In der eigenen Dorfübersicht, der Karte selbst und am
+Versammlungsplatz wird kein Planer eingeblendet. Am Versammlungsplatz bereitet ein
+kleiner Helfer nur Links vor, die aus diesem Planer stammen. Bei Verwendung des
+GitHub-Loaders den obigen Loader ebenfalls aktualisieren.
+
 Der Code kann auch als Schnellleistenskript geladen werden, sobald er unter einer
 eigenen URL gehostet wird:
 
@@ -22,6 +66,9 @@ javascript:$.getScript('https://DEINE-URL/einzelziel-snipe/einzelziel-snipe.user
 
 `DEINE-URL` ist ein Platzhalter. Die Datei wurde lokal erstellt und noch nicht gehostet.
 Für die Schnellleiste das Skript auf der Dorfinfo starten.
+Für die automatische Typübernahme am Versammlungsplatz muss das Skript oder der
+GitHub-Loader dort ebenfalls über Tampermonkey laufen. Ein einmaliger Aufruf aus
+der Schnellleiste allein lädt den Helfer im neuen Tab nicht nach.
 
 ## Bedienung
 
@@ -38,7 +85,9 @@ Für die Schnellleiste das Skript auf der Dorfinfo starten.
    alle noch nicht abgelaufenen Befehle, getrennt durch echte Zeilenumbrüche.
    In DS Workbench die kopierten Befehle über das Einfügen aus der Zwischenablage übernehmen.
 5. **Versammlungsplatz** öffnet das betreffende Dorf mit Ziel und denselben Truppenmengen
-   vorausgefüllt. Abschicken erfolgt durch den Spieler im Spiel.
+   vorausgefüllt. Der gewählte Befehlstyp wird übernommen: Bei Unterstützung ist nur
+   der Unterstützen-Button verfügbar, bei Angriff nur Angreifen. Weiter zur
+   Bestätigungsseite und Abschicken erfolgt durch den Spieler im Spiel.
 
 Ein Klick auf eine eingehende oder ausgehende Befehlszeile übernimmt deren Ankunft.
 Der URL-Parameter `landingTime` wird ebenfalls unterstützt (Unixzeit in Millisekunden).
@@ -49,6 +98,12 @@ Die Oberfläche gliedert sich in **Ziel & Ankunft**, **Einheiten wählen** und
 aktivierten Einheiten; Namen stehen im Tooltip und sind für Screenreader verfügbar.
 **Defensive**, **Offensive**, **Alle** und **Keine** ändern die Auswahl mit einem Klick.
 Defensive wählt Speere, Schwerter, Bogenschützen und schwere Kavallerie.
+**Defensive** setzt außerdem den Befehlstyp auf **Unterstützung**; **Offensive**
+und **Alle** setzen ihn auf **Angriff**. Der Typ steht direkt unter den Einheiten.
+Manuelles Hinzufügen oder Entfernen einzelner Einheiten behält den gewählten Typ
+bei, ebenso **Keine**. Er gilt für Workbench und Versammlungsplatz und wird mit
+den Einstellungen gespeichert und exportiert. Ältere Einstellungen ohne Typ
+werden anhand der Einheitenauswahl ergänzt.
 Offensive wählt Äxte, leichte Kavallerie, berittene Bogenschützen, Rammen und Katapulte;
 Adelsgeschlechter, Späher und Paladin werden bei diesen Voreinstellungen nicht mitgewählt.
 Mindestmenge, Bonus
@@ -117,8 +172,9 @@ Beispiel mit 1.000 Speeren, 2 Schwertern und 50 SK:
 123&987&sword&1791374400000&0&false&false&spear=MTAwMA==/sword=Mg==/heavy=NTA=&1
 ```
 
-Der Typ wird aus dem gesamten Befehl ermittelt: AG 11, offensive Einheiten 8,
-sonst 0, entsprechend der Einteilung des Originals. Die Ziel-ID gehört zu den
+Der gewählte Befehlstyp bestimmt das Workbench-Symbol: Unterstützung 0, Angriff 2,
+Angriff mit AG 11. Ein explizit gewählter Unterstützungsbefehl bleibt auch beim
+Hinzufügen offensiver Einheiten oder eines AG Unterstützung. Die Ziel-ID gehört zu den
 eingetragenen Koordinaten. Bei Änderung des Ziels werden nötigenfalls die Weltdaten
 unter `/map/village.txt` gelesen; neu angelegte Dörfer können dort noch fehlen.
 In diesem Fall die Dorfinfo des neuen Ziels öffnen und dort starten.
@@ -168,3 +224,9 @@ wurde nicht durchgeführt.
 Playwright-Browser ausführbaren Test ohne Shell. Er prüft beide Sortierrichtungen,
 Einzel- und Doppelsortierung, den Wechsel der Zeit-/Entfernungsspalte, Tooltips,
 erhaltene Auswahl und Exportreihenfolge auf Desktop und Mobil.
+
+`test/einzelziel-snipe.command.browser.js` prüft zusätzlich die Begrenzung auf die
+Dorfinfo, Unterstützung trotz manuell hinzugefügter offensiver Einheiten, den
+Workbench-Typ, den JSON-Export und die Vorauswahl am Versammlungsplatz einschließlich
+Enter im Truppenfeld. Alle Spielseiten sind simuliert; es werden keine echten
+Befehle abgeschickt.

@@ -2,6 +2,39 @@
 
 > **Warnhinweis: Die Nutzung erfolgt auf eigene Gefahr.** Prüfe vor dem Einsatz die aktuellen Spielregeln und alle vorgeschlagenen Aktionen. Fehler können zu Verlusten im Spiel oder zu Kontosanktionen führen.
 
+## GitHub-Loader
+
+In Tampermonkey **Neues Script erstellen** auswählen, den vorhandenen Inhalt durch den folgenden Loader ersetzen und speichern. Das Beispiel ist für dieses Skript fertig eingerichtet; du musst keine URL ändern. Eine zuvor direkt installierte Variante desselben Skripts deaktivieren, damit es nicht doppelt läuft.
+
+Bei jedem vollständigen Seitenaufruf wird die aktuelle auf GitHub veröffentlichte Version aus `master` geladen. Für ein Update eine bereits geöffnete Spielseite neu laden. GitHubs Bereitstellung kann kurz verzögert sein.
+
+```javascript
+// ==UserScript==
+// @name         Die Stämme – Truppenvorlagen (GitHub-Loader)
+// @namespace    local.die-staemme.loader.truppenvorlagen
+// @version      1.0.0
+// @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
+// @match        https://*.die-staemme.de/game.php*
+// @grant        none
+// @run-at       document-idle
+// @noframes
+// ==/UserScript==
+
+// Warnhinweis: Die Nutzung erfolgt auf eigene Gefahr.
+(() => {
+    const url = 'https://raw.githubusercontent.com/MrBoneCrash/DieStaemme/master/truppenvorlagen/truppenvorlagen.user.js';
+    fetch(`${url}?t=${Date.now()}`, { cache: 'no-store', credentials: 'omit' })
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.text();
+        })
+        .then(code => new Function(code)())
+        .catch(error => console.error('[Truppenvorlagen] Laden fehlgeschlagen:', error));
+})();
+```
+
+Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler stehen in der Browserkonsole. **Die Nutzung erfolgt auf eigene Gefahr; auch zukünftige Änderungen aus `master` werden automatisch ausgeführt.**
+
 `truppenvorlagen.user.js` erweitert die vorhandene Einzel- und
 Massenrekrutierung von **Die Stämme** um lokal gespeicherte Sollvorlagen.
 Es öffnet kein Overlay und sendet keine Rekrutierung selbst ab.

@@ -4,14 +4,14 @@
 
 Sechs eigenständige Userscripts für die deutsche Browserversion von Die Stämme. Jeder Ordner enthält das Skript und seine Anleitung.
 
-| Skript | Funktion | Anleitung |
+| Skript | Funktion | Anleitung und Loader |
 | --- | --- | --- |
-| [Angriffsplaner](angriffsplaner/angriffsplaner.user.js) | Plant Angriffe und Fakes für mehrere Ziele; exportiert nach Workbench. | [README](angriffsplaner/README.md) |
-| [Einzelziel-Snipe](einzelziel-snipe/einzelziel-snipe.user.js) | Berechnet Abschickzeiten für ein Zieldorf und exportiert Einheiten nach Workbench. | [README](einzelziel-snipe/README.md) |
-| [Marktplatz-Ausgleich](marktplatz-ausgleich/marktplatz-ausgleich.user.js) | Plant Rohstoffverteilung und Marktaktionen. | [README](marktplatz-ausgleich/README.md) |
-| [Premium-Depot](premium-depot/premium-depot.user.js) | Berechnet Verkaufsvorschläge und prüft die native Bestätigung. | [README](premium-depot/README.md) |
-| [Truppenvorlagen](truppenvorlagen/truppenvorlagen.user.js) | Speichert Sollbestände und trägt Fehlmengen in Rekrutierungsfelder ein. | [README](truppenvorlagen/README.md) |
-| [Verteidigungsassistent](verteidigungsassistent/verteidigungsassistent.user.js) | Analysiert Eingehende und plant Unterstützung sowie Ausweichbefehle. | [README](verteidigungsassistent/README.md) |
+| [Angriffsplaner](angriffsplaner/angriffsplaner.user.js) | Plant Angriffe und Fakes für mehrere Ziele; exportiert nach Workbench. | [Anleitung](angriffsplaner/README.md) · [Loader](angriffsplaner/README.md#github-loader) |
+| [Einzelziel-Snipe](einzelziel-snipe/einzelziel-snipe.user.js) | Berechnet Abschickzeiten für ein Zieldorf und exportiert Einheiten nach Workbench. | [Anleitung](einzelziel-snipe/README.md) · [Loader](einzelziel-snipe/README.md#github-loader) |
+| [Marktplatz-Ausgleich](marktplatz-ausgleich/marktplatz-ausgleich.user.js) | Plant Rohstoffverteilung und Marktaktionen. | [Anleitung](marktplatz-ausgleich/README.md) · [Loader](marktplatz-ausgleich/README.md#github-loader) |
+| [Premium-Depot](premium-depot/premium-depot.user.js) | Berechnet Verkaufsvorschläge und prüft die native Bestätigung. | [Anleitung](premium-depot/README.md) · [Loader](premium-depot/README.md#github-loader) |
+| [Truppenvorlagen](truppenvorlagen/truppenvorlagen.user.js) | Speichert Sollbestände und trägt Fehlmengen in Rekrutierungsfelder ein. | [Anleitung](truppenvorlagen/README.md) · [Loader](truppenvorlagen/README.md#github-loader) |
+| [Verteidigungsassistent](verteidigungsassistent/verteidigungsassistent.user.js) | Analysiert Eingehende und plant Unterstützung sowie Ausweichbefehle. | [Anleitung](verteidigungsassistent/README.md) · [Loader](verteidigungsassistent/README.md#github-loader) |
 
 ## Installation
 
@@ -19,19 +19,15 @@ Sechs eigenständige Userscripts für die deutsche Browserversion von Die Stämm
 2. Die gewünschte `.user.js`-Datei öffnen und vollständig als neues Userscript in Tampermonkey speichern.
 3. Die Anleitung im jeweiligen Skriptordner lesen und die dort genannte Spielseite öffnen.
 
+## Immer die aktuelle Version über GitHub laden
+
+Oben in jeder Skript-Anleitung steht ein fertig eingerichteter **GitHub-Loader**. Die Links **Loader** in der Tabelle führen direkt zum jeweiligen Beispiel. Kopiere den gewünschten Loader als neues Userscript in Tampermonkey und deaktiviere eine zuvor direkt installierte Variante desselben Skripts.
+
+Der Loader lädt bei jedem vollständigen Seitenaufruf die aktuelle auf GitHub veröffentlichte Version aus `master`; für Updates genügt ein Neuladen der Spielseite. Die fünf Skripte ohne TWForge verwenden einen kurzen `fetch`-Loader. Der Angriffsplaner nutzt `GM_xmlhttpRequest` und behält seine Berechtigung für TWForge-Berichte. Details zu dieser Funktion stehen in der [Tampermonkey-Dokumentation](https://www.tampermonkey.net/documentation.php#api:GM_xmlhttpRequest).
+
 ## Spielregeln
 
 Prüfe vor der Nutzung die aktuellen Regeln deiner Welt und eine gegebenenfalls erforderliche Freigabe durch den Support. Die Aufnahme in dieses Repository ist keine offizielle Freigabe.
 
 - [Hinweise zu externen Skripten](https://support.innogames.com/kb/TribalWars/de_DE/6023)
 - [Weitere Support-Hinweise](https://support.innogames.com/kb/TribalWars/de_DE/1317)
-
-## Lokale Entwicklung
-
-Der Ordner `test/` bleibt ausschließlich lokal und wird nicht veröffentlicht. Auch `.local/` mit lokalen Sicherungen ist ausgeschlossen. Syntaxprüfung aus dem Repository-Hauptordner:
-
-```powershell
-Get-ChildItem -Recurse -Filter *.user.js -Exclude *test* | ForEach-Object { node --check $_.FullName }
-```
-
-Die Testbefehle in den einzelnen Anleitungen setzen die lokal vorhandenen Testdateien voraus.

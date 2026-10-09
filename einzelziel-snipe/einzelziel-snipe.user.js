@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Einzelziel-Snipe
 // @namespace    local.die-staemme.einzelziel-snipe
-// @version      1.3.0
+// @version      1.4.0
 // @description  Berechnet Abschickzeiten für ein Ziel und exportiert alle ausgewählten verfügbaren Einheiten nach Workbench. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php*
 // @grant        none
@@ -22,6 +22,8 @@
         catapult: 'Katapult', knight: 'Paladin', snob: 'Adelsgeschlecht' };
     const DEFAULT_UNITS = ['spear', 'sword', 'archer', 'heavy'];
     const OFFENSE_UNITS = ['axe', 'light', 'marcher', 'ram', 'catapult'];
+    const commandMode = (command, selected) => ['support', 'attack'].includes(command) ? command :
+        selected.some(u => OFFENSE_UNITS.includes(u) || u === 'snob') ? 'attack' : 'support';
     const dateFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin',
         year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit',
         minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
@@ -83,7 +85,8 @@
         if (String(raw.bonus ?? '').trim() === '' || !Number.isFinite(bonus) || bonus < 0 || bonus > 1000)
             throw new Error('Geschwindigkeitsbonus zwischen 0 und 1000 Prozent eingeben.');
         if (!selected.length || selected.some(u => !units.includes(u))) throw new Error('Mindestens eine verfügbare Einheit auswählen.');
-        return { target, arrival: formatTime(arrival), minimum, bonus, selected };
+        if (raw.command !== undefined && !['support', 'attack'].includes(raw.command)) throw new Error('Ungültiger Befehlstyp.');
+        return { target, arrival: formatTime(arrival), minimum, bonus, selected, command: commandMode(raw.command, selected) };
     }
 
     function selectedTroops(troops, selected) {
@@ -107,7 +110,8 @@
             // Der Welt-Endpunkt liefert bereits Minuten/Feld. Laufzeit auf ganze Sekunden runden.
             const duration = Math.round(distance * Number(speeds[unit]) * 60 / (1 + config.bonus / 100)) * 1000;
             const launch = arrival - duration;
-            if (launch > now) results.push({ ...village, troops, unit, distance, duration, launch, arrival });
+            if (launch > now) results.push({ ...village, troops, unit, distance, duration, launch, arrival,
+                command: commandMode(config.command, config.selected) });
         }
         return results.sort((a, b) => a.launch - b.launch || a.id - b.id);
     }
@@ -116,7 +120,8 @@
         if (!Number.isSafeInteger(Number(targetId)) || Number(targetId) < 1) throw new Error('Die Ziel-Dorf-ID fehlt.');
         const entries = Object.entries(row.troops).filter(([u, n]) => Object.hasOwn(NAMES, u) && amount(n) > 0);
         if (!entries.length) throw new Error('Keine Einheiten zum Exportieren.');
-        const type = row.troops.snob > 0 ? 11 : entries.some(([u]) => ['axe', 'light', 'marcher', 'ram', 'catapult'].includes(u)) ? 8 : 0;
+        // DS Workbench: Speer-Symbol = Unterstützung (0), Axt = Angriff (2), AG = 11.
+        const type = commandMode(row.command, entries.map(([u]) => u)) === 'support' ? 0 : row.troops.snob > 0 ? 11 : 2;
         return `${row.id}&${Number(targetId)}&${row.unit}&${row.arrival}&${type}&false&false&` +
             entries.map(([u, n]) => `${u}=${encode(String(n))}`).join('/') + '&1\n';
     }
@@ -178,14 +183,40 @@
         return [...villages.values()];
     }
 
-    const core = { amount, coords, formatTime, parseTime, validateConfig, selectedTroops, plan, workbench, parseTroops, sortResults };
+    function isVillageInfo(url, screen) {
+        const parameters = new URL(url).searchParams;
+        return screen === 'info_village' && parameters.get('screen') === 'info_village' && /^[1-9]\d*$/.test(parameters.get('id') || '');
+    }
+
+    function prepareCommand(doc, command) {
+        if (!['support', 'attack'].includes(command)) return false;
+        const chosen = doc.querySelector(`input[type="submit"][name="${command}"], button[type="submit"][name="${command}"]`);
+        const form = chosen?.form;
+        const other = form?.querySelector(`[name="${command === 'support' ? 'attack' : 'support'}"]`);
+        if (!form || !other || chosen.disabled) return false;
+        // Nur den passenden Weiter-Button anbieten. Kein Klick und kein automatisches Absenden.
+        other.disabled = true; other.hidden = true;
+        // Enter verwendet den ersten Submit-Button im Formular, auch wenn dieser deaktiviert ist.
+        other.before(chosen);
+        chosen.focus();
+        return true;
+    }
+
+    const core = { amount, coords, formatTime, parseTime, validateConfig, selectedTroops, plan, workbench, parseTroops, sortResults, isVillageInfo, prepareCommand };
     if (typeof module === 'object' && module.exports) { module.exports = core; return; }
-    if (!window.game_data || game_data.screen !== 'info_village') return;
+    if (!window.game_data) return;
+    const parameters = new URL(location.href).searchParams;
+    if (game_data.screen === 'place' && parameters.get('screen') === 'place' &&
+        !parameters.has('try') && ['', 'command'].includes(parameters.get('mode') || '')) {
+        prepareCommand(document, parameters.get('ds_snipe_command'));
+        return;
+    }
+    if (!isVillageInfo(location.href, game_data.screen)) return;
     if (window[ID]) { window[ID].scrollIntoView({ block: 'start' }); return; }
 
     const gd = game_data, units = gd.units.filter(u => Object.hasOwn(NAMES, u));
     const key = `${ID}:${location.host}:${gd.world}:${gd.player.id}`;
-    let rows = [], calculated = null, targetId = null, busy = false, worldPromise, mapPromise;
+    let rows = [], calculated = null, targetId = null, busy = false, worldPromise, mapPromise, command = 'support';
     const sorting = { troops: 0, other: { key: 'launch', direction: 1 } };
     const sortNames = { troops: 'Truppen', distance: 'Felder', launch: 'Abschickzeit', remaining: 'Verbleibend' };
     const sortHelp = 'Klick: aufsteigend → absteigend → aus. Truppen zählt alle enthaltenen Einheiten, nicht ihre Stärke. Truppen kann mit Felder, Abschickzeit oder Verbleibend kombiniert werden. Bei zwei Sortierungen gilt Truppen zuerst (1), bei gleicher Anzahl die andere Spalte (2). Felder und Zeit ersetzen einander. Ohne aktive Sortierung gilt die ursprüngliche Reihenfolge.';
@@ -394,7 +425,7 @@
             <button type="button" data-action="units-none">Keine</button></div></div>
         <div class="ds-units">${units.map(u => `<label class="ds-unit" title="${NAMES[u]}"><input type="checkbox" data-unit="${u}" aria-label="${NAMES[u]}">
         <img src="/graphic/unit/unit_${u}.webp" alt="" aria-hidden="true"></label>`).join('')}</div>
-        <p class="ds-rule">Alle ausgewählten Bestände werden übernommen. Die langsamste Einheit bestimmt die Laufzeit.</p>
+        <p class="ds-rule"><strong data-command-type></strong> · Alle ausgewählten Bestände werden übernommen. Die langsamste Einheit bestimmt die Laufzeit.</p>
     </fieldset>
     <details><summary>Filter &amp; weitere Einstellungen</summary><div class="ds-options">
         <label class="ds-field">Mindestmenge je Einheit<input data-minimum type="number" min="1" step="1" aria-describedby="ds-snipe-min-hint">
@@ -432,12 +463,16 @@
         $('[data-minimum]').value = config.minimum ?? 50;
         $('[data-group]').value = config.group ?? '0';
         const chosen = Array.isArray(config.selected) ? config.selected : DEFAULT_UNITS;
+        command = commandMode(config.command, chosen);
         panel.querySelectorAll('[data-unit]').forEach(e => { e.checked = chosen.includes(e.dataset.unit); });
         selectionCount();
     }
     function selectionCount() {
         const count = panel.querySelectorAll('[data-unit]:checked').length;
         $('[data-selection-count]').textContent = `${count} von ${units.length}`;
+        $('[data-command-type]').textContent = command === 'support' ? 'Unterstützung' : 'Angriff';
+        for (const mode of ['defense', 'offense']) $('[data-action="units-' + mode + '"]').setAttribute('aria-pressed',
+            String(command === (mode === 'defense' ? 'support' : 'attack')));
     }
     function emptyResults(title = 'Dein Plan beginnt mit einem Ziel.', description = 'Wähle Einheiten und eine Ankunftszeit. Danach findest du hier die passenden Dörfer mit ihren Abschickzeiten.') {
         $('[data-results]').innerHTML = `<div class="ds-empty"><span class="ds-empty-icon" aria-hidden="true">⌖</span>
@@ -456,7 +491,7 @@
     }
     function readConfig() {
         return { ...validateConfig({ target: $('[data-target]').value, arrival: $('[data-arrival]').value,
-            bonus: $('[data-bonus]').value, minimum: $('[data-minimum]').value,
+            bonus: $('[data-bonus]').value, minimum: $('[data-minimum]').value, command,
             selected: [...panel.querySelectorAll('[data-unit]:checked')].map(e => e.dataset.unit) }, units),
         group: $('[data-group]').value };
     }
@@ -527,7 +562,7 @@
     }
     function commandURL(row) {
         const [x, y] = calculated.target.split('|');
-        return gameURL('place', { village: row.id, x, y, ...row.troops }).href;
+        return gameURL('place', { village: row.id, x, y, ...row.troops, ds_snipe_command: row.command }).href;
     }
     function sortButton(key) {
         const tooltip = key === 'troops' ? 'Nach Gesamtanzahl aller enthaltenen Einheiten sortieren, nicht nach Stärke.' :
@@ -635,7 +670,7 @@
         try {
             const [villages, info, destination] = await Promise.all([loadTroops(config.group), speeds(), resolveTarget(config.target)]);
             rows = plan(villages, info, config, serverNow()).map(row => ({ ...row, selected: true })); calculated = config; targetId = destination;
-            save('preferences', { selected: config.selected, group: config.group }); save(`target:${config.target}`, config);
+            save('preferences', { selected: config.selected, group: config.group, command: config.command }); save(`target:${config.target}`, config);
             render(); message(`${rows.length} mögliche Befehle aus ${villages.length} Dörfern. Bestände geladen: ${formatTime(Math.floor(serverNow() / 1000) * 1000)}.`);
         } finally {
             busy = false; panel.querySelectorAll('input, select, button').forEach(e => { e.disabled = false; });
@@ -693,6 +728,8 @@
             }
             if (action.startsWith('units-')) {
                 const chosen = action === 'units-all' ? units : action === 'units-defense' ? DEFAULT_UNITS : action === 'units-offense' ? OFFENSE_UNITS : [];
+                if (action === 'units-defense') command = 'support';
+                else if (action === 'units-offense' || action === 'units-all') command = 'attack';
                 panel.querySelectorAll('[data-unit]').forEach(e => { e.checked = chosen.includes(e.dataset.unit); });
                 selectionCount(); invalidate(); message('Einheitenauswahl geändert. Bitte neu berechnen.');
             }
