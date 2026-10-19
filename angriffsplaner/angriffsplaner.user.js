@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.6.1
+// @version      1.6.2
 // @description  Plant Fakes und Offs aus eigenen Beständen mit DB-Info-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -51,6 +51,73 @@
         if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0 ? value : NaN;
         const s = String(value ?? '').trim().replace(/[\s\u00a0\u202f]/g, '');
         return /^(?:\d+|\d{1,3}(?:\.\d{3})+)$/.test(s) ? Number(s.replace(/\./g, '')) : NaN;
+    }
+    function retryAfterMs(value, timestamp) {
+        if (value == null || String(value).trim() === '') return 0;
+        const text = String(value).trim();
+        if (/^[+-]?\d+(?:\.\d+)?$/.test(text)) { const ms = Number(text) * 1000; return Number.isFinite(ms) ? Math.max(0, Math.ceil(ms)) : 0; }
+        const date = Date.parse(text); return Number.isFinite(date) ? Math.max(0, date - timestamp) : 0;
+    }
+    function waitForRequest(ms, signal) {
+        return new Promise((resolve, reject) => {
+            const cancelled = () => { clearTimeout(timer); reject(new Error('Datenabruf abgebrochen.')); };
+            const timer = setTimeout(() => { signal?.removeEventListener('abort', cancelled); resolve(); }, ms);
+            if (signal?.aborted) cancelled(); else signal?.addEventListener('abort', cancelled, { once: true });
+        });
+    }
+    function createRequestQueue({ fetchResponse, signal, timestamp = () => Date.now(), delay = waitForRequest,
+        onWait = () => {}, readState = () => ({}), writeState = () => {}, withLock = task => task(), interval = 2000, retries = 3, backoff = 30000 }) {
+        let tail = Promise.resolve(), epoch = 0, local = { nextAt: 0, retryUntil: 0, interval };
+        function state() {
+            let stored = {}; try { stored = readState() || {}; } catch {}
+            for (const field of ['nextAt', 'retryUntil', 'interval'])
+                if (Number.isFinite(stored[field]) && stored[field] >= 0) local[field] = Math.max(local[field], stored[field]);
+            local.interval = Math.max(interval, Math.min(10000, local.interval)); return local;
+        }
+        function save() { try { writeState({ ...local }); } catch {} }
+        function check() { if (signal?.aborted) throw new Error('Datenabruf abgebrochen.'); }
+        function checkEpoch(mine) {
+            if (mine !== epoch) { const error = new Error('Weitere Abfragen nach einem Abruffehler abgebrochen.'); error.queueCancelled = true; throw error; }
+        }
+        async function wait(context, attempt) {
+            for (;;) {
+                check(); const shared = state(), remainingMs = Math.max(shared.nextAt, shared.retryUntil) - timestamp();
+                if (remainingMs <= 0) return;
+                onWait({ reason: shared.retryUntil > timestamp() ? 'rate-limit' : 'pace', remainingMs, context, attempt });
+                await delay(Math.min(1000, remainingMs), signal);
+            }
+        }
+        return (url, context = 'Spieldaten') => {
+            const mine = epoch;
+            const job = tail.then(async () => {
+                check(); checkEpoch(mine);
+                onWait({ reason: 'queued', context });
+                return withLock(async () => {
+                    check(); checkEpoch(mine);
+                    try {
+                        for (let attempt = 0; attempt <= retries; attempt++) {
+                            await wait(context, attempt);
+                            onWait({ reason: 'fetch', context });
+                            local.nextAt = timestamp() + state().interval; save();
+                            const response = await fetchResponse(url);
+                            if (response.status !== 429) {
+                                if (!response.ok) throw new Error(`Datenabruf fehlgeschlagen (HTTP ${response.status}).`);
+                                const text = await response.text(); onWait({ reason: 'done', context }); return text;
+                            }
+                            try { await response.body?.cancel(); } catch {}
+                            const pause = Math.max(backoff * 2 ** attempt, retryAfterMs(response.headers?.get('Retry-After'), timestamp()));
+                            local.retryUntil = Math.max(local.retryUntil, timestamp() + pause);
+                            local.nextAt = Math.max(local.nextAt, local.retryUntil); local.interval = Math.min(10000, local.interval * 2); save();
+                            if (attempt === retries) {
+                                onWait({ reason: 'failed', context });
+                                throw new Error(`Spielserver begrenzt Anfragen (HTTP 429). Nach ${retries} Wiederholungen gestoppt. Frühestens in ${Math.ceil(pause / 1000)} Sekunden erneut laden; die Wartefrist bleibt gespeichert.`);
+                            }
+                        }
+                    } catch (error) { epoch++; throw error; }
+                });
+            });
+            tail = job.catch(() => {}); return job;
+        };
     }
     function decode(value) { try { return decodeURIComponent(String(value).replace(/\+/g, ' ')); } catch { throw new Error('Ungültige Weltdaten.'); } }
     function parseMap(playerText, villageText, allyText = '') {
@@ -704,7 +771,7 @@
         return `${row.id}&${row.target.id}&${row.unit}&${row.arrival}&${type}&false&false&` +
             Object.entries(row.troops).filter(([, n]) => n > 0).map(([u, n]) => `${u}=${encode(String(n))}`).join('/') + '&1\n';
     }
-    const core = { amount, parts, formatTime, parseTime, parseMap, resolveTargets, readTemplates, minimumPop, fakeMinimumPop, population, offensivePopulation, meetsOff, dbPayload, dbError,
+    const core = { amount, retryAfterMs, waitForRequest, createRequestQueue, parts, formatTime, parseTime, parseMap, resolveTargets, readTemplates, minimumPop, fakeMinimumPop, population, offensivePopulation, meetsOff, dbPayload, dbError,
         attack, fakePacket, normalizeReport, defense, offPacket, inNight, nextDaylight, daytimeIntervals, timing, counts,
         bounds, plan, capacityUpper, findCapacity, noblePacket, scheduleBundle, buildConquests, planConquests, parseWorld, parsePlace, workbench, workerSource, defaultWindows, persistentSettings, LIMIT };
     if (typeof module === 'object' && module.exports) { module.exports = core; return; }
@@ -736,16 +803,32 @@
         if (Number(gd.player.sitter) > 0) url.searchParams.set('t', gd.player.id);
         return url;
     }
-    async function request(url) {
-        const response = await fetch(url, { credentials: 'same-origin', signal: abort.signal });
-        if (!response.ok) throw new Error(`Datenabruf fehlgeschlagen (HTTP ${response.status}).`);
-        return response.text();
-    }
+    const requestKey = `${ID}:game-requests:${gd.world}:${gd.player.id}`;
+    const throttledRequest = createRequestQueue({
+        fetchResponse: url => fetch(url, { credentials: 'same-origin', signal: abort.signal }), signal: abort.signal,
+        readState: () => JSON.parse(localStorage.getItem(requestKey) || '{}'),
+        writeState: value => localStorage.setItem(requestKey, JSON.stringify(value)),
+        withLock: task => navigator.locks?.request ? navigator.locks.request(requestKey, { signal: abort.signal }, task) : task(),
+        onWait: ({ reason, remainingMs, context, attempt }) => {
+            const badge = $('[data-request-badge]'), status = $('[data-request-status]');
+            if (reason === 'fetch' || reason === 'done') { badge.hidden = true; status.hidden = true; return; }
+            badge.hidden = false; status.hidden = false;
+            if (reason === 'failed') { badge.textContent = ' · HTTP 429: Abruf gestoppt'; status.textContent = 'Der Spielserver begrenzt Anfragen (HTTP 429). Bestandsabruf gestoppt; bitte später erneut laden.'; return; }
+            if (reason === 'queued') { badge.textContent = ' · Datenabruf'; status.textContent = `${context}: Warteschlange – Bestände werden nacheinander geladen, höchstens eine Spielabfrage gleichzeitig.`; return; }
+            const seconds = Math.ceil(remainingMs / 1000), limited = reason === 'rate-limit';
+            badge.textContent = ` · ${limited ? 'HTTP 429 – Wartezeit' : 'Abrufpause'}: ${seconds} s`;
+            status.textContent = limited ? `Spielserver begrenzt Anfragen (HTTP 429). ${context}: noch ${seconds} Sekunden warten${attempt ? ` vor Wiederholung ${attempt}/3` : ''}. Keine weiteren Spielabfragen während dieser Pause.` :
+                `${context}: ${seconds} Sekunden Abrufpause, damit nicht zu viele Anfragen entstehen (mindestens 2 Sekunden Abstand).`;
+        }
+    });
+    function request(url, context = 'Spieldaten laden') { return throttledRequest(url, context); }
     async function pool(items, task, width = 2) {
-        const results = new Array(items.length); let index = 0;
-        await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
-            while (index < items.length) { const i = index++; results[i] = await task(items[i], i); }
+        const results = new Array(items.length); let index = 0, failed = false;
+        const workers = await Promise.allSettled(Array.from({ length: Math.min(width, items.length) }, async () => {
+            while (!failed && index < items.length) { const i = index++; try { results[i] = await task(items[i], i); } catch (error) { failed = true; throw error; } }
         }));
+        const error = workers.find(w => w.status === 'rejected' && !w.reason?.queueCancelled) || workers.find(w => w.status === 'rejected');
+        if (error) throw error.reason;
         return results;
     }
     function compute(operation, selected, destination, config, total) {
@@ -863,8 +946,8 @@
                 coords: `${gd.village.x}|${gd.village.y}`, player: +gd.player.id, points: +gd.village.points });
         if (!listed.length) throw new Error('Keine eigenen Dörfer in den Weltdaten gefunden.');
         const choices = stored('sources', {});
-        sources = await pool(listed, async s => {
-            const doc = new DOMParser().parseFromString(await request(gameURL('place', { village: s.id })), 'text/html');
+        sources = await pool(listed, async (s, index) => {
+            const doc = new DOMParser().parseFromString(await request(gameURL('place', { village: s.id }), `Bestände ${index + 1}/${listed.length} · ${s.coords}`), 'text/html');
             const troops = parsePlace(doc, units, s.id);
             // Aktuelle Punkte bevorzugen, falls die native Seite sie als game_data ausgibt.
             const data = doc.documentElement.innerHTML.match(/\bgame_data\s*=\s*(\{[^\n]+\})\s*;/);
@@ -1013,8 +1096,8 @@
         const selectedIds = new Set(sources.filter(s => s.selected).map(s => s.id));
         // Erneute Bestandsaufnahme vor jeder Kapazitätsberechnung.
         let done = 0;
-        await pool(sources.filter(s => selectedIds.has(s.id)), async s => {
-            const doc = new DOMParser().parseFromString(await request(gameURL('place', { village: s.id })), 'text/html');
+        await pool(sources.filter(s => selectedIds.has(s.id)), async (s, index) => {
+            const doc = new DOMParser().parseFromString(await request(gameURL('place', { village: s.id }), `Bestände ${index + 1}/${selectedIds.size} · ${s.coords}`), 'text/html');
             s.troops = parsePlace(doc, units, s.id);
             message(`Bestände aktualisieren: ${++done} / ${selectedIds.size} …`);
         });
@@ -1254,7 +1337,7 @@
         #${ID} .ds-planner-toggle[open]>summary{border-bottom:1px solid var(--line)}
         @media(max-width:760px){#${ID} .ds-source{grid-template-columns:minmax(120px,1fr) 125px}#${ID} .ds-source>.ds-troops{grid-column:1/-1}#${ID} .ds-fields{grid-template-columns:1fr}#${ID} [data-row]>td:first-child{width:auto}}
     </style>
-    <details class="ds-planner-toggle" data-planner-toggle><summary>Angriffsplaner</summary>
+    <details class="ds-planner-toggle" data-planner-toggle><summary>Angriffsplaner<small data-request-badge hidden></small></summary>
     <div class="ds-body">
         <label>Planungsmodus<select data-planning-mode><option value="standard">Offs + Fakes</option><option value="ag">AG-Modus: Cleaner + AG-Trains + Fakes</option></select></label>
         <div data-ag-options hidden>
@@ -1288,7 +1371,7 @@
         <div class="ds-export-tools"><button type="button" data-all-sources>Alle</button><button type="button" data-no-sources>Keine</button><button type="button" data-reload>Bestände neu laden</button></div></div>
         <input data-source-search placeholder="Dorfname oder Koordinaten filtern" aria-label="Quelldörfer filtern"><div class="ds-sources" data-sources></div>
         <div class="ds-run"><button class="ds-primary" type="button" data-capacity>Kapazität berechnen →</button><strong data-maximum>–</strong></div>
-        <p data-status role="status" aria-live="polite">Welt und eigene Dörfer werden geladen …</p><button type="button" data-cancel hidden>Berechnung abbrechen</button></div>
+        <p data-request-status role="status" aria-live="polite" hidden></p><p data-status role="status" aria-live="polite">Welt und eigene Dörfer werden geladen …</p><button type="button" data-cancel hidden>Berechnung abbrechen</button></div>
     <div class="ds-result-area"><div class="ds-result-heading"><h3>Angriffe planen</h3><button type="button" data-wb disabled>WB kopieren</button></div>
         <label>Angriffszahl <strong data-count-label></strong><input type="range" data-count min="1" max="1" value="1" disabled></label>
         <div class="ds-run"><button type="button" class="ds-primary" data-plan disabled>Plan erstellen →</button></div><p class="ds-hint" data-summary>Noch keine Kapazität berechnet.</p>

@@ -209,9 +209,30 @@ Die eigene Dorfmenge kommt aus `/map/village.txt`, gefiltert nach der angemeldet
 Spieler-ID. Das aktuelle Dorf wird bei Bedarf aus `game_data` ergänzt, wenn es noch
 nicht in der stündlich aktualisierten Karte steht. Die abschickbaren Truppen kommen
 aus dem **Versammlungsplatz jedes Quelldorfs**, nicht aus Gesamtbeständen einschließlich
-auswärtiger Truppen oder fremder Unterstützung. Die Abfragen laufen mit höchstens
-zwei parallelen gleichursprünglichen GET-Anfragen. Bestände mit unlesbaren Werten
+auswärtiger Truppen oder fremder Unterstützung. Die Abfragen laufen über eine
+gemeinsame Warteschlange für gleichursprüngliche GET-Anfragen. Es läuft
+**höchstens eine Spielabfrage gleichzeitig**, mit **mindestens 2 Sekunden Abstand**
+zwischen den Starts. Dies gilt auch für das Laden der Weltkonfiguration und Karte.
+Bestände mit unlesbaren Werten
 führen zu einem Fehler statt zu einer Schätzung.
+
+Bei **HTTP 429 (Too Many Requests)** pausiert die gesamte Spielabfrage-Warteschlange.
+Ein vorhandener `Retry-After`-Header wird als Sekundenwert oder HTTP-Datum beachtet;
+die Pause beträgt mindestens 30 Sekunden, bei wiederholter Ablehnung 60 und 120
+Sekunden. Währenddessen zeigen eine eigene Statuszeile und die **auch eingeklappt
+sichtbare Planer-Leiste** den Grund, das betroffene Dorf und einen Countdown.
+Danach wird dieselbe Abfrage automatisch wiederholt, höchstens dreimal.
+Weitere Ablehnungen stoppen den Abruf mit einer verständlichen Fehlermeldung;
+die restliche Warteschlange fragt nicht im Hintergrund weiter ab.
+
+Nach einer Ablehnung steigt der normale Anfrageabstand auf 4, dann 8 und maximal
+10 Sekunden. Abstand und Wartefrist werden getrennt von den Planungseinstellungen
+für Welt und Spieler lokal gespeichert. Neuladen setzt sie daher nicht zurück.
+Mit unterstützter Browser-Sperre (`navigator.locks`) stimmen auch mehrere
+Planer-Tabs derselben Welt und desselben Spielers ihre Abfragen ab. Ohne diese
+Browserfunktion gilt die Serialisierung je Tab; die gespeicherte Wartefrist wird
+weiterhin gemeinsam gelesen. Andere Skripte werden durch diese Warteschlange
+nicht gesteuert. Die tatsächliche serverseitige Grenze ist dadurch nicht garantiert.
 
 Die Fake-Größe einschließlich der gewünschten Reserve ist:
 
@@ -420,6 +441,7 @@ Die Befehle werden im Repository-Hauptordner ausgeführt. Der Ordner `test` blei
 ```powershell
 node --check angriffsplaner/angriffsplaner.user.js
 node --test test/angriffsplaner.core.test.cjs
+node --test test/angriffsplaner.requests.test.cjs
 node test/angriffsplaner.browser.cjs
 ```
 
@@ -432,6 +454,10 @@ Zeitzonenwechsel, Nachtbonus, beide Zeitfenster, Kapazität, Worker, WB-Roundtri
 Auswahl, Exportablauf sowie Desktop- und Mobildarstellung. Ein Regressionstest
 plant 487 Befehle mit 146 verfügbaren Offs und prüft genau 146 Offs + 341 Fakes,
 eindeutige Fake-Paare, Tarnfakes je Off-Dorf und höchstens 5 % Kraftverlust.
+Die Anfragetests prüfen Abstände, Serialisierung, gespeicherte Wartefristen,
+Tab-Koordination, Abbruch und wiederholte 429-Antworten. Die Browsertests simulieren
+HTTP 429 mit `Retry-After: 90`, prüfen die sichtbare Pause und die Wiederaufnahme
+mit beschleunigter Testzeit; dabei werden keine echten Spielabfragen ausgeführt.
 Screenshots liegen unter
 `test/artifacts/angriffsplaner-desktop.png` und `test/artifacts/angriffsplaner-mobile.png`.
 
