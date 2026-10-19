@@ -76,22 +76,26 @@ einen DS-Util / DS-Workbench-Importcode. Es schickt keine Angriffe ab.
    speichern. Die Berechtigung für `marionettenaufstand.de` wird für die Berichtsanalyse benötigt.
 2. Den **Versammlungsplatz** öffnen. Oberhalb des bisherigen Seiteninhalts steht die
    eingeklappte Leiste **Angriffsplaner**. Zum Benutzen die Leiste anklicken.
-3. Ziele eingeben: Spielernamen, Stammnamen/-Tags und Dorfkoordinaten, getrennt durch Zeilenumbrüche,
+3. Oben den hervorgehobenen ersten Schritt **Bestände laden** ausführen. Erst dieser
+   Klick lädt Welt, Karte und eigene Dorfbestände. Beim Seitenaufruf und beim
+   Öffnen des Planers wird nichts davon automatisch abgefragt. Solange Schritt 1
+   nicht vollständig abgeschlossen ist, bleiben die weiteren Planungsschritte gesperrt.
+4. Ziele eingeben: Spielernamen, Stammnamen/-Tags und Dorfkoordinaten, getrennt durch Zeilenumbrüche,
    Kommas oder Semikolons. Namen mit Leerzeichen bleiben erhalten. Spielernamen
    werden während der Eingabe gegen die Weltdaten geprüft; alle Dörfer des Spielers
    werden Ziele. Stammnamen oder Tags (auch `[TAG]`) kommen direkt in dasselbe
    Textfeld und ergänzen alle Spieler und deren Dörfer aus `/map/ally.txt` und `/map/player.txt`.
    Mehrere Stämme sind möglich. Doppelte Ziele werden zusammengeführt. Eigene Dörfer sind keine Ziele.
-4. Fake-Prozentsatz per Slider wählen. Der Anteil bezieht sich auf **Angriffsbefehle**,
+5. Fake-Prozentsatz per Slider wählen. Der Anteil bezieht sich auf **Angriffsbefehle**,
    nicht auf Truppen oder Ziele. Er ist ein **Wunschverhältnis für die anfängliche
    Angriffszahl**. Alle unter diesen Einstellungen möglichen Offs werden zuerst
    reserviert, soweit die gewählte Gesamtzahl reicht. Erhöhen der Anzahl ergänzt
    Fakes, ohne Offs zu verdrängen. Ohne Offs entstehen nur Fakes. Die tatsächliche
    Verteilung steht bereits vor dem Erstellen in der berechneten Vorschau.
    **100 % Fakes** ist die ausdrückliche Auswahl eines reinen Fake-Plans.
-5. Optional eine Off-Vorlage aus `truppenvorlagen.user.js` wählen. Verwendet wird dessen
+6. Optional eine Off-Vorlage aus `truppenvorlagen.user.js` wählen. Verwendet wird dessen
    lokaler Vorlagenspeicher für denselben Host, dieselbe Welt und denselben Spieler.
-6. Quelldörfer auswählen und bei Bedarf ihre Rolle auf **Nur Offs** oder **Nur Fakes**
+7. Quelldörfer auswählen und bei Bedarf ihre Rolle auf **Nur Offs** oder **Nur Fakes**
    setzen. Der Suchfilter verändert die Auswahl nicht. **Alle** und **Keine** gelten
    für die gesamte Dorfmenge, einschließlich gerade ausgefilterter Dörfer.
    Die **Mindest-Off-Mengen** werden je Einheit eingegeben, standardmäßig
@@ -100,22 +104,24 @@ einen DS-Util / DS-Workbench-Importcode. Es schickt keine Angriffe ab.
    ausschließlich eine Eignungsgrenze, **keine Versandgröße**. Kleinere Bestände stehen für Fakes zur Verfügung, auch bei einem
    zuvor als Off-Dorf markierten Quelldorf. Ebenso dürfen unzureichende Off-Dörfer
    fehlende Offs durch Fakes ersetzen.
-7. Unter **Zeitfenster & Berichtseinstellungen** optional den Abschickzeitraum,
+8. Unter **Zeitfenster & Berichtseinstellungen** optional den Abschickzeitraum,
    den Ankunftszeitraum oder beide begrenzen. Zeitformat: `TT.MM.JJJJ HH:MM:SS`.
    Zeiten beziehen sich auf `Europe/Berlin`, einschließlich Sommer-/Winterzeit.
-   Die Felder sind bei jedem Seitenaufruf frisch vorbelegt: Abschicken ab fünf
+   Die Felder werden beim ersten Beständeladen je Seitenaufruf frisch vorbelegt: Abschicken ab fünf
    Minuten nach der aktuellen Serverzeit für eine Stunde; Ankunft zunächst sechs
    Stunden später, bei Bedarf auf das Ende des Nachtbonus verschoben. Der
    Ankunftsbereich dauert bis zu eine Stunde und endet vor einem neuen Nachtbonus.
    Beide Begrenzungen starten deaktiviert und lassen sich an den Plan anpassen.
-8. **Kapazität berechnen** aktualisiert die Bestände der gewählten Dörfer, liest
+9. **2. Kapazität berechnen** verwendet die manuell geladene Bestandsaufnahme, liest
    Berichte und berechnet die unter diesen Einstellungen erreichbare Angriffszahl.
+   Dabei werden die Dorfbestände **nicht erneut automatisch abgefragt**. Nach fünf
+   Minuten muss Schritt 1 erneut manuell ausgeführt werden.
    Angezeigt werden die erreichbare Gesamtzahl und die tatsächliche Off-Kapazität.
    Anschließend die gewünschte Anzahl per zweitem Slider wählen. Jede Änderung
    aktualisiert zunächst nur die Anzeige. **Erst beim Loslassen des Sliders**
    (dem `change`-Ereignis, ebenso bei Tastaturbedienung) startet die neue Vorschau im Worker; bis zu deren Abschluss bleibt
    **Plan erstellen** gesperrt. Der Knopf übernimmt genau diese Vorschau.
-9. **Plan erstellen** zeigt Truppen, Quell- und Zieldorf, Abschickzeit und Ankunft
+10. **Plan erstellen** zeigt Truppen, Quell- und Zieldorf, Abschickzeit und Ankunft
    für jeden Befehl. **WB kopieren** kopiert alle ausgewählten, noch abschickbaren
    Befehle; jede Zeile hat zusätzlich einen eigenen Kopierknopf. Bei gesperrter
    Zwischenablage steht der Code in einem Textfeld zum manuellen Kopieren bereit.
@@ -216,18 +222,21 @@ zwischen den Starts. Dies gilt auch für das Laden der Weltkonfiguration und Kar
 Bestände mit unlesbaren Werten
 führen zu einem Fehler statt zu einer Schätzung.
 
-Bei **HTTP 429 (Too Many Requests)** pausiert die gesamte Spielabfrage-Warteschlange.
-Ein vorhandener `Retry-After`-Header wird als Sekundenwert oder HTTP-Datum beachtet;
-die Pause beträgt mindestens 30 Sekunden, bei wiederholter Ablehnung 60 und 120
-Sekunden. Währenddessen zeigen eine eigene Statuszeile und die **auch eingeklappt
-sichtbare Planer-Leiste** den Grund, das betroffene Dorf und einen Countdown.
-Danach wird dieselbe Abfrage automatisch wiederholt, höchstens dreimal.
-Weitere Ablehnungen stoppen den Abruf mit einer verständlichen Fehlermeldung;
-die restliche Warteschlange fragt nicht im Hintergrund weiter ab.
+Beim normalen Laden genügt ein **Spinner**, ohne Countdown oder laufende
+Pausenmeldungen. Die Drosselung um zwei Sekunden bleibt im Hintergrund aktiv.
+Nur bei **HTTP 429 (Too Many Requests)** wird die Warteschlange ausdrücklich
+pausiert und der Grund angezeigt, auch an der eingeklappten Planer-Leiste.
+Der Button **Fortsetzen** ist zunächst gesperrt und wird **nach fünf Sekunden**
+freigegeben. Es erfolgt **keine automatische Wiederholung**, auch nicht nach
+längerem Warten. Erst der manuelle Klick setzt dieselbe Abfrage fort.
+Kommt erneut HTTP 429, ist wieder ein manueller Klick nach Freigabe erforderlich.
 
-Nach einer Ablehnung steigt der normale Anfrageabstand auf 4, dann 8 und maximal
-10 Sekunden. Abstand und Wartefrist werden getrennt von den Planungseinstellungen
-für Welt und Spieler lokal gespeichert. Neuladen setzt sie daher nicht zurück.
+Ein vorhandener `Retry-After`-Header wird weiterhin als Sekundenwert oder HTTP-Datum
+beachtet. Fordert der Server mehr als fünf Sekunden Wartezeit, kann der Nutzer
+nach fünf Sekunden das Fortsetzen bestätigen; die verbleibende Serverfrist wird
+anschließend mit Spinner abgewartet. Es gibt dabei keinen Countdown. Die Wartefrist
+bleibt für Welt und Spieler gespeichert; Neuladen umgeht sie nicht und löst
+seinerseits keinen Abruf aus.
 Mit unterstützter Browser-Sperre (`navigator.locks`) stimmen auch mehrere
 Planer-Tabs derselben Welt und desselben Spielers ihre Abfragen ab. Ohne diese
 Browserfunktion gilt die Serialisierung je Tab; die gespeicherte Wartefrist wird
@@ -455,9 +464,11 @@ Auswahl, Exportablauf sowie Desktop- und Mobildarstellung. Ein Regressionstest
 plant 487 Befehle mit 146 verfügbaren Offs und prüft genau 146 Offs + 341 Fakes,
 eindeutige Fake-Paare, Tarnfakes je Off-Dorf und höchstens 5 % Kraftverlust.
 Die Anfragetests prüfen Abstände, Serialisierung, gespeicherte Wartefristen,
-Tab-Koordination, Abbruch und wiederholte 429-Antworten. Die Browsertests simulieren
-HTTP 429 mit `Retry-After: 90`, prüfen die sichtbare Pause und die Wiederaufnahme
-mit beschleunigter Testzeit; dabei werden keine echten Spielabfragen ausgeführt.
+Tab-Koordination, Abbruch und manuelles Fortsetzen nach wiederholten 429-Antworten.
+Die Browsertests prüfen, dass vor Schritt 1 keine Abfragen stattfinden und dass
+die Kapazitätsberechnung keine neuen Bestandsabfragen startet. Bei simuliertem
+HTTP 429 mit `Retry-After: 90` erfolgen auch nach Ablauf der Frist keine weiteren
+Anfragen ohne Klick. Die Testzeit läuft beschleunigt; echte Spielabfragen erfolgen nicht.
 Screenshots liegen unter
 `test/artifacts/angriffsplaner-desktop.png` und `test/artifacts/angriffsplaner-mobile.png`.
 

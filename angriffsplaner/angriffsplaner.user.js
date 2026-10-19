@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.6.2
+// @version      1.6.3
 // @description  Plant Fakes und Offs aus eigenen Beständen mit DB-Info-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -66,24 +66,25 @@
         });
     }
     function createRequestQueue({ fetchResponse, signal, timestamp = () => Date.now(), delay = waitForRequest,
-        onWait = () => {}, readState = () => ({}), writeState = () => {}, withLock = task => task(), interval = 2000, retries = 3, backoff = 30000 }) {
+        onWait = () => {}, readState = () => ({}), writeState = () => {}, withLock = task => task(), interval = 2000,
+        requestResume = async () => { throw new Error('HTTP 429: Abruf pausiert. Manuelles Fortsetzen erforderlich.'); } }) {
         let tail = Promise.resolve(), epoch = 0, local = { nextAt: 0, retryUntil: 0, interval };
         function state() {
             let stored = {}; try { stored = readState() || {}; } catch {}
-            for (const field of ['nextAt', 'retryUntil', 'interval'])
+            for (const field of ['nextAt', 'retryUntil'])
                 if (Number.isFinite(stored[field]) && stored[field] >= 0) local[field] = Math.max(local[field], stored[field]);
-            local.interval = Math.max(interval, Math.min(10000, local.interval)); return local;
+            local.interval = interval; return local;
         }
         function save() { try { writeState({ ...local }); } catch {} }
         function check() { if (signal?.aborted) throw new Error('Datenabruf abgebrochen.'); }
         function checkEpoch(mine) {
             if (mine !== epoch) { const error = new Error('Weitere Abfragen nach einem Abruffehler abgebrochen.'); error.queueCancelled = true; throw error; }
         }
-        async function wait(context, attempt) {
+        async function wait(context) {
             for (;;) {
                 check(); const shared = state(), remainingMs = Math.max(shared.nextAt, shared.retryUntil) - timestamp();
                 if (remainingMs <= 0) return;
-                onWait({ reason: shared.retryUntil > timestamp() ? 'rate-limit' : 'pace', remainingMs, context, attempt });
+                onWait({ reason: shared.retryUntil > timestamp() ? 'server-wait' : 'pace', context });
                 await delay(Math.min(1000, remainingMs), signal);
             }
         }
@@ -95,8 +96,8 @@
                 return withLock(async () => {
                     check(); checkEpoch(mine);
                     try {
-                        for (let attempt = 0; attempt <= retries; attempt++) {
-                            await wait(context, attempt);
+                        for (;;) {
+                            await wait(context);
                             onWait({ reason: 'fetch', context });
                             local.nextAt = timestamp() + state().interval; save();
                             const response = await fetchResponse(url);
@@ -105,13 +106,12 @@
                                 const text = await response.text(); onWait({ reason: 'done', context }); return text;
                             }
                             try { await response.body?.cancel(); } catch {}
-                            const pause = Math.max(backoff * 2 ** attempt, retryAfterMs(response.headers?.get('Retry-After'), timestamp()));
+                            const pause = Math.max(5000, retryAfterMs(response.headers?.get('Retry-After'), timestamp()));
                             local.retryUntil = Math.max(local.retryUntil, timestamp() + pause);
-                            local.nextAt = Math.max(local.nextAt, local.retryUntil); local.interval = Math.min(10000, local.interval * 2); save();
-                            if (attempt === retries) {
-                                onWait({ reason: 'failed', context });
-                                throw new Error(`Spielserver begrenzt Anfragen (HTTP 429). Nach ${retries} Wiederholungen gestoppt. Frühestens in ${Math.ceil(pause / 1000)} Sekunden erneut laden; die Wartefrist bleibt gespeichert.`);
-                            }
+                            local.nextAt = Math.max(local.nextAt, local.retryUntil); save();
+                            onWait({ reason: 'paused', context });
+                            await requestResume({ readyAt: timestamp() + 5000, notBefore: local.retryUntil, context, signal });
+                            check(); onWait({ reason: 'resumed', context });
                         }
                     } catch (error) { epoch++; throw error; }
                 });
@@ -783,9 +783,9 @@
     const gd = win.game_data, units = gd.units.filter(u => NAMES[u]);
     const key = `${ID}:${location.host}:${gd.world}:${gd.player.id}`;
     let world, map, templates = [], sources = [], targets = [], result = null, capacity = null, desiredAttackCount = null,
-        busy = false, generation = 0, validationTimer, preview = null, clockBase = 0, clockAt = 0;
+        busy = false, generation = 0, validationTimer, preview = null, clockBase = 0, clockAt = 0, stocksLoadedAt = 0;
     const abort = new AbortController();
-    let activeWorker, cancelCompute;
+    let activeWorker, cancelCompute, resumeRequest;
     const root = document.createElement('section'); root.id = ID;
     const $ = selector => root.querySelector(selector);
     function now() {
@@ -809,16 +809,27 @@
         readState: () => JSON.parse(localStorage.getItem(requestKey) || '{}'),
         writeState: value => localStorage.setItem(requestKey, JSON.stringify(value)),
         withLock: task => navigator.locks?.request ? navigator.locks.request(requestKey, { signal: abort.signal }, task) : task(),
-        onWait: ({ reason, remainingMs, context, attempt }) => {
+        requestResume: ({ readyAt, signal }) => new Promise((resolve, reject) => {
+            const button = $('[data-resume]'); button.hidden = false; button.disabled = true;
+            const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', cancelled); resumeRequest = null; button.hidden = true; };
+            const cancelled = () => { cleanup(); reject(new Error('Datenabruf abgebrochen.')); };
+            const timer = setTimeout(() => { if (!signal?.aborted) button.disabled = false; }, Math.max(0, readyAt - Date.now()));
+            resumeRequest = () => { if (Date.now() < readyAt) return; cleanup(); resolve(); };
+            if (signal?.aborted) cancelled(); else signal?.addEventListener('abort', cancelled, { once: true });
+        }),
+        onWait: ({ reason, context }) => {
             const badge = $('[data-request-badge]'), status = $('[data-request-status]');
-            if (reason === 'fetch' || reason === 'done') { badge.hidden = true; status.hidden = true; return; }
-            badge.hidden = false; status.hidden = false;
-            if (reason === 'failed') { badge.textContent = ' · HTTP 429: Abruf gestoppt'; status.textContent = 'Der Spielserver begrenzt Anfragen (HTTP 429). Bestandsabruf gestoppt; bitte später erneut laden.'; return; }
-            if (reason === 'queued') { badge.textContent = ' · Datenabruf'; status.textContent = `${context}: Warteschlange – Bestände werden nacheinander geladen, höchstens eine Spielabfrage gleichzeitig.`; return; }
-            const seconds = Math.ceil(remainingMs / 1000), limited = reason === 'rate-limit';
-            badge.textContent = ` · ${limited ? 'HTTP 429 – Wartezeit' : 'Abrufpause'}: ${seconds} s`;
-            status.textContent = limited ? `Spielserver begrenzt Anfragen (HTTP 429). ${context}: noch ${seconds} Sekunden warten${attempt ? ` vor Wiederholung ${attempt}/3` : ''}. Keine weiteren Spielabfragen während dieser Pause.` :
-                `${context}: ${seconds} Sekunden Abrufpause, damit nicht zu viele Anfragen entstehen (mindestens 2 Sekunden Abstand).`;
+            badge.hidden = false; badge.textContent = ' · Lädt …';
+            if (reason === 'paused') {
+                $('[data-load-spinner]').hidden = true; badge.textContent = ' · HTTP 429: pausiert'; status.hidden = false;
+                $('[data-load-state]').textContent = 'Bestandsabruf pausiert.';
+                status.textContent = `Der Spielserver begrenzt Anfragen (HTTP 429). ${context}: Abruf pausiert. „Fortsetzen“ wird nach fünf Sekunden freigegeben. Erst dein Klick setzt den Abruf fort.`; return;
+            }
+            if (reason === 'resumed') $('[data-load-state]').textContent = 'Bestände werden geladen …';
+            if (reason === 'server-wait') {
+                status.hidden = false; status.textContent = 'Eine vom Server vorgegebene Wartefrist wird eingehalten. Nach dem manuellen Fortsetzen läuft der Abruf weiter.';
+            } else status.hidden = true;
+            $('[data-load-spinner]').hidden = false;
         }
     });
     function request(url, context = 'Spieldaten laden') { return throttledRequest(url, context); }
@@ -854,10 +865,15 @@
     function message(text, error = false) { $('[data-status]').textContent = text; $('[data-status]').dataset.tone = error ? 'error' : busy ? 'loading' : 'info'; }
     function setBusy(value) {
         busy = value; root.setAttribute('aria-busy', String(value));
+        $('[data-planning-step]').disabled = value || !stocksLoadedAt;
+        $('[data-load-spinner]').hidden = !value;
+        $('[data-request-badge]').hidden = !value;
+        if (value) $('[data-request-badge]').textContent = ' · Lädt …';
         root.querySelectorAll('input, select, button, textarea:not([data-export])').forEach(e => { e.disabled = value; });
         if (!value) {
             if ($('[data-status]').dataset.tone === 'loading') $('[data-status]').dataset.tone = 'info';
             $('[data-count]').disabled = !capacity?.maximum; $('[data-plan]').disabled = !preview?.complete; tick();
+            $('[data-capacity]').disabled = !stocksLoadedAt;
         }
     }
     function invalidate() {
@@ -1083,7 +1099,8 @@
         catch { field.focus(); field.select(); message('WB-Code steht zum Kopieren bereit: Strg+C.'); }
     }
     async function calculateCapacity() {
-        if (!world || !map) throw new Error('Welt und eigene Dörfer zuerst über „Bestände neu laden“ laden.');
+        if (!stocksLoadedAt || !world || !map) throw new Error('Zuerst Schritt 1 „Bestände laden“ abschließen.');
+        if (now() - stocksLoadedAt > 300000) { stocksLoadedAt = 0; invalidate(); $('[data-load-state]').textContent = 'Bestände veraltet. Bitte Schritt 1 erneut ausführen.'; throw new Error('Bestände älter als fünf Minuten. Bitte „Bestände laden“ anklicken.'); }
         const parsed = validateTargets();
         if (!parsed?.valid) throw new Error('Alle Zieleingaben müssen gültig sein. Ungültige Namen oder Koordinaten korrigieren.');
         if (!sources.some(s => s.selected)) throw new Error('Mindestens ein Quelldorf auswählen.');
@@ -1093,19 +1110,13 @@
         invalidate();
         const mine = generation;
         const reportInfo = await loadReports(config);
+        if (now() - stocksLoadedAt > 300000) { stocksLoadedAt = 0; $('[data-load-state]').textContent = 'Bestände veraltet. Bitte Schritt 1 erneut ausführen.'; throw new Error('Bestände inzwischen älter als fünf Minuten. Bitte „Bestände laden“ anklicken.'); }
         const selectedIds = new Set(sources.filter(s => s.selected).map(s => s.id));
-        // Erneute Bestandsaufnahme vor jeder Kapazitätsberechnung.
-        let done = 0;
-        await pool(sources.filter(s => selectedIds.has(s.id)), async (s, index) => {
-            const doc = new DOMParser().parseFromString(await request(gameURL('place', { village: s.id }), `Bestände ${index + 1}/${selectedIds.size} · ${s.coords}`), 'text/html');
-            s.troops = parsePlace(doc, units, s.id);
-            message(`Bestände aktualisieren: ${++done} / ${selectedIds.size} …`);
-        });
         const selected = sources.filter(s => selectedIds.has(s.id));
         const estimated = await compute('capacity', selected, targets, config);
         if (mine !== generation) return;
         capacity = { ...estimated, config: { ...config, maxOffs: estimated.maxOffs, ...(estimated.conquestBase ? { conquestBase: estimated.conquestBase } : {}) }, sources: selected.map(s => ({ ...s, troops: { ...s.troops } })),
-            targets: targets.map(t => ({ ...t })), time: now(), reportInfo };
+            targets: targets.map(t => ({ ...t })), time: stocksLoadedAt, reportInfo };
         $('[data-maximum]').textContent = `${estimated.maximum.toLocaleString('de-DE')} Angriffe · ${config.mode === 'ag' ? `${estimated.maxTrains} vollständige AG-Trains (${estimated.maxTrains * config.agPerTarget} AGs)` : `maximal ${estimated.maxOffs} Offs`}`;
         $('[data-count]').min = String(Math.max(1, estimated.minAttacks || 1));
         $('[data-count]').max = String(Math.max(1, estimated.maximum));
@@ -1330,6 +1341,10 @@
         #${ID} .ds-plan-group>summary{padding:10px 12px}
         #${ID} .ds-plan-group>summary .ds-hint{margin-top:3px}
         #${ID} .ds-plan-group .ds-table{margin:0}
+        #${ID} .ds-load-step{padding:14px;border:2px solid #987345;border-radius:6px;background:#fff8e9;margin-bottom:16px}
+        #${ID} .ds-load-step h3{font-size:16px;margin-bottom:8px}
+        #${ID} .ds-spinner{display:inline-block;width:18px;height:18px;border:3px solid #d9c8a6;border-top-color:#794322;border-radius:50%;animation:ds-planner-spin .8s linear infinite;vertical-align:middle}
+        @keyframes ds-planner-spin{to{transform:rotate(360deg)}}
         #${ID} [data-result-tools]{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:12px 0}
         #${ID} [data-result-tools] select{width:auto;max-width:100%}
         #${ID} details.ds-planner-toggle{margin:0}
@@ -1339,6 +1354,10 @@
     </style>
     <details class="ds-planner-toggle" data-planner-toggle><summary>Angriffsplaner<small data-request-badge hidden></small></summary>
     <div class="ds-body">
+        <section class="ds-load-step"><h3>1. Bestände laden</h3><p class="ds-hint">Fester erster Schritt: Welt und eigene Dorfbestände werden erst durch deinen Klick geladen. Die Planung verwendet anschließend diese Bestandsaufnahme.</p>
+        <div class="ds-run"><button type="button" class="ds-primary" data-reload>Bestände laden</button><span class="ds-spinner" data-load-spinner role="status" aria-label="Wird geladen" hidden></span><button type="button" data-resume hidden disabled>Fortsetzen</button></div>
+        <p data-load-state>Noch keine Bestände geladen.</p><p data-request-status role="status" aria-live="polite" hidden></p><p data-status role="status" aria-live="polite">Bitte zuerst „Bestände laden“ anklicken.</p></section></div>
+        <fieldset data-planning-step disabled><div class="ds-body">
         <label>Planungsmodus<select data-planning-mode><option value="standard">Offs + Fakes</option><option value="ag">AG-Modus: Cleaner + AG-Trains + Fakes</option></select></label>
         <div data-ag-options hidden>
         <div class="ds-fields"><label>AG-Angriffe je Ziel<input type="number" data-ag-count min="1" max="10" value="4"></label><p class="ds-hint">Je AG-Angriff genau 1 Adelsgeschlecht. Ein Paket enthält 1 große Cleaner-Off und einen vollständigen Train. AGs können aus mehreren eigenen Dörfern stammen.</p></div>
@@ -1365,18 +1384,18 @@
         <div><label>Kraftreserve für bekannte Verteidigung (%)<input type="number" data-reserve min="100" max="500" value="125"></label>
         <label>Abstand zwischen allen Abschickzeiten im Plan (Sekunden)<input type="number" data-gap min="1" max="60" value="1"></label>
         <p class="ds-hint">Off-Priorität: aktuelle Berichte mit Truppen, dann AG → Off → Deff. Stärke ist eine Schätzung aus Einheitenwerten; Wall, Moral, Forschung und Sonderboni sind darin nicht enthalten.</p></div></div>
-        <p class="ds-hint" data-world>Welteinstellungen werden geladen …</p></details>
+        <p class="ds-hint" data-world>Welteinstellungen werden in Schritt 1 geladen.</p></details>
     </div>
     <div class="ds-result-area"><div class="ds-result-heading"><h3>Quelldörfer <span class="ds-result-count" data-source-count>0 gewählt</span></h3>
-        <div class="ds-export-tools"><button type="button" data-all-sources>Alle</button><button type="button" data-no-sources>Keine</button><button type="button" data-reload>Bestände neu laden</button></div></div>
+        <div class="ds-export-tools"><button type="button" data-all-sources>Alle</button><button type="button" data-no-sources>Keine</button></div></div>
         <input data-source-search placeholder="Dorfname oder Koordinaten filtern" aria-label="Quelldörfer filtern"><div class="ds-sources" data-sources></div>
-        <div class="ds-run"><button class="ds-primary" type="button" data-capacity>Kapazität berechnen →</button><strong data-maximum>–</strong></div>
-        <p data-request-status role="status" aria-live="polite" hidden></p><p data-status role="status" aria-live="polite">Welt und eigene Dörfer werden geladen …</p><button type="button" data-cancel hidden>Berechnung abbrechen</button></div>
-    <div class="ds-result-area"><div class="ds-result-heading"><h3>Angriffe planen</h3><button type="button" data-wb disabled>WB kopieren</button></div>
+        <div class="ds-run"><button class="ds-primary" type="button" data-capacity disabled>2. Kapazität berechnen →</button><strong data-maximum>–</strong></div>
+        <button type="button" data-cancel hidden>Berechnung abbrechen</button></div>
+    <div class="ds-result-area"><div class="ds-result-heading"><h3>3. Angriffe planen</h3><button type="button" data-wb disabled>WB kopieren</button></div>
         <label>Angriffszahl <strong data-count-label></strong><input type="range" data-count min="1" max="1" value="1" disabled></label>
         <div class="ds-run"><button type="button" class="ds-primary" data-plan disabled>Plan erstellen →</button></div><p class="ds-hint" data-summary>Noch keine Kapazität berechnet.</p>
         <div data-result-tools hidden><label>Ansicht <select data-result-view><option value="time">Zeitliste</option><option value="source">Quelldorf → seine Ziele</option><option value="target">Zieldorf ← seine Angreifer</option></select></label><label class="ds-check"><input type="checkbox" data-all-results> Alle Befehle auswählen</label><span class="ds-hint">Gruppen zum Aufklappen. Die WB-Auswahl bleibt beim Ansichtswechsel erhalten.</span></div><div data-results></div></div>
-    <div class="ds-export-box" data-export-wrap hidden><label>DS-Util / DS Workbench Import<textarea data-export readonly rows="6" spellcheck="false" aria-label="Workbench-Importcode"></textarea></label></div></details>`;
+    <div class="ds-export-box" data-export-wrap hidden><label>DS-Util / DS Workbench Import<textarea data-export readonly rows="6" spellcheck="false" aria-label="Workbench-Importcode"></textarea></label></div></fieldset></details>`;
     (document.querySelector('#content_value, #mobileContent, #contentContainer') || document.body).prepend(root);
     // Auch bei Rückkehr über den Browser-Verlauf keinen geöffneten Zustand wiederherstellen.
     win.addEventListener('pageshow', event => {
@@ -1424,13 +1443,19 @@
     });
     root.addEventListener('click', event => {
         const b = event.target.closest('button'); if (!b || b.disabled) return;
-        if (b.matches('[data-capacity]')) run(calculateCapacity);
+        if (b.matches('[data-resume]')) resumeRequest?.();
+        else if (b.matches('[data-capacity]')) run(calculateCapacity);
         else if (b.matches('[data-check-db]')) run(checkDB);
         else if (b.matches('[data-plan]')) run(makePlan);
         else if (b.matches('[data-reload]')) run(async () => {
-            if (!world || !map) { await init(); return; }
-            save('sources', Object.fromEntries(sources.map(s => [s.id, { selected: s.selected, role: s.role }])));
-            invalidate(); refreshTemplates(); await loadSources(); message('Eigene Bestände und Vorlagen aktualisiert.');
+            persist(); stocksLoadedAt = 0; $('[data-planning-step]').disabled = true; invalidate(); refreshTemplates();
+            $('[data-load-state]').textContent = 'Bestände werden geladen …';
+            try {
+                if (!world || !map) await loadWorld();
+                await loadSources(); stocksLoadedAt = now(); persist();
+                $('[data-load-state]').textContent = `${sources.length} Dörfer geladen · ${formatTime(stocksLoadedAt)}`;
+                message('Bestände geladen. Jetzt Ziele eingeben, Quelldörfer wählen und Kapazität berechnen.');
+            } catch (error) { $('[data-load-state]').textContent = 'Bestände nicht vollständig geladen. Schritt 1 erneut ausführen.'; throw error; }
         });
         else if (b.matches('[data-cancel]')) cancelCompute?.();
         else if (b.matches('[data-all-sources], [data-no-sources]')) { sources.forEach(s => { s.selected = b.matches('[data-all-sources]'); }); invalidate(); renderSources(); persist(); }
@@ -1441,7 +1466,7 @@
         });
     });
     win.addEventListener('storage', event => { if (event.key?.startsWith('ds-troop-templates:')) { refreshTemplates(); invalidate(); } });
-    async function init() {
+    function restoreSettings() {
         const values = stored('settings', {});
         desiredAttackCount = Number.isInteger(values.attackCount) && values.attackCount > 0 ? values.attackCount : null;
         for (const [k, selector] of Object.entries({ targets: 'targets', fakePercent: 'ratio', maxAge: 'age', reserve: 'reserve', gap: 'gap' }))
@@ -1457,6 +1482,8 @@
         $('[data-db-key]').value = values.apiKey ?? localStorage.getItem('dbkey') ?? '';
         refreshTemplates(); if (values.template) $('[data-template]').value = values.template;
         updateCounts();
+    }
+    async function loadWorld() {
         const [cfg, info, players, villages, allies] = await Promise.all([
             request('/interface.php?func=get_config'), request('/interface.php?func=get_unit_info'), request('/map/player.txt'), request('/map/village.txt'), request('/map/ally.txt')]);
         world = parseWorld(new DOMParser().parseFromString(cfg, 'application/xml'), new DOMParser().parseFromString(info, 'application/xml'), units);
@@ -1464,8 +1491,7 @@
         map = parseMap(players, villages, allies);
         validateTargets();
         $('[data-world]').textContent = `Welt ${gd.world} · Fakelimit ${world.fakeLimit} % der Quelldorfpunkte + 3 Einwohner Reserve · Fakes bevorzugt Katapulte + 1 Späher, ohne Speere · ${world.night.active ? `Nachtbonus ${world.night.start}:00–${world.night.end}:00` : 'Kein Nachtbonus'} · Laufzeiten aus der Weltkonfiguration.`;
-        await loadSources(); persist(); message('Ziele eingeben, Quelldörfer wählen und Kapazität berechnen.');
     }
-    run(init);
+    restoreSettings(); setBusy(false);
     const timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); abort.abort(); activeWorker?.terminate(); return; } tick(); }, 1000);
 })();
