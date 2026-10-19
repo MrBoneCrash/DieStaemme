@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.6.0
-// @description  Plant Fakes und Offs aus eigenen Beständen mit TWForge-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
+// @version      1.6.1
+// @description  Plant Fakes und Offs aus eigenen Beständen mit DB-Info-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
 // @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
@@ -231,8 +231,8 @@
     }
     function dbPayload(apiKey, coords, boundary) {
         const key = String(apiKey).trim(), match = String(coords).match(/^(\d{1,3})\|(\d{1,3})$/);
-        if (!key || /[\r\n\x00]/.test(key)) throw new Error('TWForge-Schlüssel muss vollständig in einer Zeile stehen.');
-        if (!match) throw new Error('Ungültige Koordinaten für TWForge.');
+        if (!key || /[\r\n\x00]/.test(key)) throw new Error('DB-Info-Schlüssel muss vollständig in einer Zeile stehen.');
+        if (!match) throw new Error('Ungültige Koordinaten für DB-Info.');
         return [['Key', key], ['X', match[1]], ['Y', match[2]]].map(([name, value]) =>
             `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`).join('') + `--${boundary}--\r\n`;
     }
@@ -243,9 +243,9 @@
             ['Key', 'X', 'Y', 'world', 'action'].filter(f => a === f || a?.name === f || a?.field === f || a?.argument === f || a?.path === f)))] : [];
         const worldMissing = status === 400 && raw.code === 'COMMON-1' && fields.includes('world');
         const explanation = [401, 403].includes(status) ? 'Schlüssel wurde vom Server nicht zur Datenbankabfrage zugelassen. DB-Info-Zugriff für diese Welt und den dazugehörigen Schlüssel prüfen.' :
-            worldMissing ? `Welt${world ? ` ${world}` : ''} wird für diese DB-Info-Abfrage nicht gefunden. Weltverknüpfung und Zugriff in TWForge prüfen.` :
+            worldMissing ? `Welt${world ? ` ${world}` : ''} wird für diese DB-Info-Abfrage nicht gefunden. Weltverknüpfung und Zugriff in DB-Info prüfen.` :
             status === 400 ? `Server lehnt Anfrageparameter ab${fields.length ? `: ${fields.join(', ')}` : ''}. Vollständigen DB-Info-Schlüssel und ausgewählte Welt prüfen.` : 'Abfrage fehlgeschlagen.';
-        const e = new Error(`TWForge (HTTP ${status}${code}): ${explanation}`); e.auth = status === 401 || status === 403;
+        const e = new Error(`DB-Info (HTTP ${status}${code}): ${explanation}`); e.auth = status === 401 || status === 403;
         e.configuration = worldMissing;
         return e;
     }
@@ -877,14 +877,14 @@
     }
     function dbRequest(target, apiKey) {
         const url = 'https://marionettenaufstand.de/api/userscript/db-info';
-        // Nur der konfigurierte TWForge-Endpunkt erhält den Schlüssel, keine fremden serverConfig-URLs.
-        // Der TWForge-Endpunkt erwartet Multipart wie das offizielle DB-Info-Skript.
+        // Nur der konfigurierte DB-Info-Endpunkt erhält den Schlüssel, keine fremden serverConfig-URLs.
+        // Der DB-Info-Endpunkt erwartet Multipart wie das offizielle DB-Info-Skript.
         const boundary = `dsplanner${crypto.randomUUID().replace(/-/g, '')}`;
         const body = dbPayload(apiKey, target.coords, boundary);
-        if (typeof GM_xmlhttpRequest !== 'function') throw new Error('TWForge benötigt Tampermonkey mit GM_xmlhttpRequest.');
+        if (typeof GM_xmlhttpRequest !== 'function') throw new Error('DB-Info benötigt Tampermonkey mit GM_xmlhttpRequest.');
         return new Promise((resolve, reject) => {
             const handle = GM_xmlhttpRequest({ method: 'POST', url, data: body, anonymous: true,
-                // Native DB-Info-XHR sendet diesen Header automatisch. TWForge bestimmt darüber die Spielwelt.
+                // Native DB-Info-XHR sendet diesen Header automatisch. DB-Info bestimmt darüber die Spielwelt.
                 // Die Welt im URL-Parameter allein reicht nicht; der Erweiterungskontext besitzt keinen Spiel-Origin.
                 headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, Origin: location.origin },
                 timeout: 20000, // Explizites Multipart vermeidet FormData-Serialisierungsfehler verschiedener Userscript-Manager.
@@ -892,9 +892,9 @@
                     if (r.status !== 200) {
                         reject(dbError(r.status, r.responseText, gd.world)); return;
                     }
-                    try { const data = JSON.parse(r.responseText); if (data?.error) throw new Error('TWForge meldet einen API-Fehler.'); resolve(data); }
-                    catch { reject(new Error('TWForge liefert keine gültigen Berichtsdaten.')); }
-                }, onerror: () => reject(new Error('TWForge-Verbindungsfehler.')), ontimeout: () => reject(new Error('TWForge-Zeitüberschreitung.')),
+                    try { const data = JSON.parse(r.responseText); if (data?.error) throw new Error('DB-Info meldet einen API-Fehler.'); resolve(data); }
+                    catch { reject(new Error('DB-Info liefert keine gültigen Berichtsdaten.')); }
+                }, onerror: () => reject(new Error('DB-Info-Verbindungsfehler.')), ontimeout: () => reject(new Error('DB-Info-Zeitüberschreitung.')),
                 onabort: () => reject(new Error('Abfrage abgebrochen.')) });
             abort.signal.addEventListener('abort', () => handle?.abort(), { once: true });
         });
@@ -902,7 +902,7 @@
     async function loadReports(config) {
         if (!config.useDB) { targets = targets.map(t => ({ ...t, report: null })); return { fresh: 0, missing: targets.length, failed: 0 }; }
         const apiKey = $('[data-db-key]').value.trim() || localStorage.getItem('dbkey');
-        if (!apiKey) throw new Error('TWForge-Schlüssel fehlt. DB-Info konfigurieren oder unter Berichtseinstellungen eingeben.');
+        if (!apiKey) throw new Error('DB-Info-Schlüssel fehlt. DB-Info konfigurieren oder unter Berichtseinstellungen eingeben.');
         let done = 0, fresh = 0, failed = 0, authenticationError, lastError;
         targets = await pool(targets, async t => {
             let report = null;
@@ -911,20 +911,20 @@
                 catch (e) { failed++; lastError = e; if (e.auth || e.configuration) authenticationError = e; }
             } else failed++;
             if (report) fresh++;
-            message(`TWForge prüfen: ${++done} / ${targets.length} Ziele …`);
+            message(`DB-Info prüfen: ${++done} / ${targets.length} Ziele …`);
             return { ...t, report };
         });
         if (authenticationError) throw authenticationError;
-        if (failed === targets.length) throw new Error(`Keine TWForge-Abfrage erfolgreich. ${lastError?.message || 'Verbindung prüfen.'}`);
+        if (failed === targets.length) throw new Error(`Keine DB-Info-Abfrage erfolgreich. ${lastError?.message || 'Verbindung prüfen.'}`);
         return { fresh, missing: targets.length - fresh, failed, error: lastError?.message || '' };
     }
     async function checkDB() {
         const apiKey = $('[data-db-key]').value.trim() || localStorage.getItem('dbkey');
-        if (!apiKey) throw new Error('TWForge-Schlüssel fehlt. API-Schlüssel eingeben.');
+        if (!apiKey) throw new Error('DB-Info-Schlüssel fehlt. API-Schlüssel eingeben.');
         const destination = validateTargets()?.targets[0] || { coords: `${gd.village.x}|${gd.village.y}` };
         const data = await dbRequest(destination, apiKey);
         const report = normalizeReport(data, world, now(), +$('[data-age]').value || 7);
-        message(`TWForge-Verbindung erfolgreich (HTTP 200) · ${destination.coords}${report ? ' · aktueller Bericht verfügbar.' : ' · kein aktueller vollständiger Bericht verfügbar.'}`);
+        message(`DB-Info-Verbindung erfolgreich (HTTP 200) · ${destination.coords}${report ? ' · aktueller Bericht verfügbar.' : ' · kein aktueller vollständiger Bericht verfügbar.'}`);
     }
     function span(ms) { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }
     function planTime(time) { return formatTime(time) + (capacity?.config.mode === 'ag' ? `.${String(time % 1000).padStart(3, '0')}` : ''); }
@@ -1275,10 +1275,10 @@
         <details><summary>Zeitfenster & Berichtseinstellungen</summary><p class="ds-hint">Alle Zeiten: deutsche Serverzeit. Ankünfte im Nachtbonus werden ausgeschlossen. Beide Zeitfenster können unabhängig gewählt werden.</p>
         <div class="ds-fields"><fieldset><label class="ds-check"><input type="checkbox" data-use-send> Abschickzeitraum begrenzen</label><label>Von<input data-send-start placeholder="TT.MM.JJJJ HH:MM:SS"></label><label>Bis<input data-send-end placeholder="TT.MM.JJJJ HH:MM:SS"></label></fieldset>
         <fieldset><label class="ds-check"><input type="checkbox" data-use-arrival> Ankunftszeitraum begrenzen</label><label>Von<input data-arrival-start placeholder="TT.MM.JJJJ HH:MM:SS"></label><label>Bis<input data-arrival-end placeholder="TT.MM.JJJJ HH:MM:SS"></label></fieldset></div>
-        <div class="ds-fields"><div><label class="ds-check"><input type="checkbox" data-db checked> TWForge-Berichte berücksichtigen</label>
+        <div class="ds-fields"><div><label class="ds-check"><input type="checkbox" data-db checked> DB-Info-Berichte berücksichtigen</label>
         <label>Maximales Berichtsalter (Tage)<input type="number" data-age min="0.01" max="365" step="0.1" value="7"></label>
-        <label>TWForge-API-Schlüssel<input type="password" data-db-key autocomplete="off" placeholder="Verwendet den Schlüssel aus DB-Info"></label><span class="ds-hint">Wird zusammen mit den übrigen Einstellungen lokal für diese Welt und diesen Spieler gespeichert.</span>
-        <button type="button" data-check-db>TWForge-Verbindung prüfen</button></div>
+        <label>DB-Info-API-Schlüssel<input type="password" data-db-key autocomplete="off" placeholder="Verwendet den Schlüssel aus DB-Info"></label><span class="ds-hint">Wird zusammen mit den übrigen Einstellungen lokal für diese Welt und diesen Spieler gespeichert.</span>
+        <button type="button" data-check-db>DB-Info-Verbindung prüfen</button></div>
         <div><label>Kraftreserve für bekannte Verteidigung (%)<input type="number" data-reserve min="100" max="500" value="125"></label>
         <label>Abstand zwischen allen Abschickzeiten im Plan (Sekunden)<input type="number" data-gap min="1" max="60" value="1"></label>
         <p class="ds-hint">Off-Priorität: aktuelle Berichte mit Truppen, dann AG → Off → Deff. Stärke ist eine Schätzung aus Einheitenwerten; Wall, Moral, Forschung und Sonderboni sind darin nicht enthalten.</p></div></div>

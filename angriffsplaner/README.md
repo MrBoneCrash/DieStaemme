@@ -56,7 +56,7 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 })();
 ```
 
-Die Anfrageberechtigung für `raw.githubusercontent.com` lädt die Datei; `marionettenaufstand.de` wird für TWForge-Berichte benötigt. Erlaube diese Domains, wenn Tampermonkey danach fragt.
+Die Anfrageberechtigung für `raw.githubusercontent.com` lädt die Datei; `marionettenaufstand.de` wird für DB-Info-Berichte benötigt. Erlaube diese Domains, wenn Tampermonkey danach fragt.
 
 Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler stehen in der Browserkonsole. **Die Nutzung erfolgt auf eigene Gefahr; auch zukünftige Änderungen aus `master` werden automatisch ausgeführt.**
 
@@ -301,7 +301,7 @@ Forschung, Kirche, Flaggen, Paladin-Gegenstände und weitere Sonderboni sind nic
 Teil dieser Stärkeabschätzung. Auch ein aktueller Bericht garantiert keinen
 unveränderten Truppenbestand bei der Ankunft. Die Kraftreserve ist deshalb einstellbar.
 
-## TWForge
+## DB-Info
 
 Das API-Verfahren wurde im offiziellen DB-Info-Skript nachvollzogen:
 [723_DB_Info_SxR_suilenrocm_MKich_Osse.js](https://media.innogames.com/com_DS_DE/Scriptdatenbank/userscript_main/723_DB_Info_SxR_suilenrocm_MKich_Osse.js).
@@ -317,8 +317,8 @@ Der Schlüssel wird aus `localStorage.dbkey` des vorhandenen DB-Info-Skripts gel
 Alternativ lässt er sich im Planer eingeben; eingegebene Schlüssel werden zusammen
 mit den Einstellungen lokal gespeichert, aber niemals exportiert oder an den
 Planungs-Worker weitergegeben. Die Anfrage geht ausschließlich an den festen
-TWForge-Endpunkt. `serverConfig`-URLs aus anderen Skripten werden nicht übernommen.
-Für die TWForge-Anfrage verwendet Tampermonkey `GM_xmlhttpRequest`; ein reines
+DB-Info-Endpunkt. `serverConfig`-URLs aus anderen Skripten werden nicht übernommen.
+Für die DB-Info-Anfrage verwendet Tampermonkey `GM_xmlhttpRequest`; ein reines
 Schnellleistenskript ohne diese Berechtigung reicht für die DB-Abfrage nicht aus.
 
 Die Anfrage verwendet ein explizit serialisiertes **Multipart-Formular** mit `Key`,
@@ -329,30 +329,15 @@ Zusätzlich sendet die Anfrage **`Origin: https://<aktuelle Spielwelt>.die-staem
 aus `location.origin`. Im offiziellen Skript entsteht dieser Header automatisch
 durch die native `XMLHttpRequest`-Anfrage aus der Spielseite. Der Planer setzt ihn
 für `GM_xmlhttpRequest` ausdrücklich, da der Erweiterungskontext sonst keinen
-Spiel-Origin sendet. TWForge benötigt diesen Header zur Weltzuordnung; der
-URL-Parameter `world` allein reicht nicht.
-Die vorherige URL-Formularcodierung wurde entfernt: Ein öffentlicher Test mit einem
-absichtlich ungültigen Schlüssel lieferte damit HTTP 500, mit Multipart dagegen
-die erwartete Authentifizierungsablehnung HTTP 403. **TWForge-Verbindung prüfen**
+Spiel-Origin sendet. **DB-Info-Verbindung prüfen**
 prüft den eingegebenen Schlüssel unabhängig von der Kapazitätsberechnung und zeigt
 HTTP-/API-Fehlercodes oder eine erfolgreiche Verbindung an. Eine erfolgreiche
 Verbindung bedeutet nicht, dass für das abgefragte Dorf ein aktueller Bericht existiert.
 
-`HTTP 403 · COMMON-6` ist eine vom TWForge-Server abgelehnte Authentifizierung.
+`HTTP 403 · COMMON-6` ist eine vom DB-Info-Server abgelehnte Authentifizierung.
 `HTTP 400 · COMMON-1` weist auf abgelehnte Anfrageparameter hin. Bekannte betroffene
 Feldnamen werden angezeigt; Servertexte oder abgelehnte Werte werden niemals
-ausgegeben, damit darin enthaltene Schlüssel nicht sichtbar werden. Der Multipart-
-Aufbau wurde am echten Endpunkt mit einem absichtlich ungültigen Testschlüssel
-geprüft (HTTP 403 / COMMON-6).
-
-Am 09.10.2026 wurde die Ursache mit dem vom Nutzer bereitgestellten Schlüssel
-auf `de256` eingegrenzt: Ohne `Origin` lieferte TWForge HTTP 400 / COMMON-1 mit
-`rejectedArguments.path = world`. Ein `Referer`-Header allein änderte dies nicht.
-Mit dem Spiel-Origin und tatsächlich existierenden Dorfkoordinaten aus der
-öffentlichen Weltkarte lieferte der Server **HTTP 200** und das erwartete
-DB-Info-Antwortformat. Dies wurde sowohl für native FormData als auch für das
-explizite Multipart des Planers geprüft. Die frühere Vermutung einer fehlerhaften
-TWForge-Weltzuordnung ist damit korrigiert. Der Schlüssel wurde nicht in Dateien gespeichert.
+ausgegeben, damit darin enthaltene Schlüssel nicht sichtbar werden.
 Andere Welt- oder Zugriffsfehler werden weiterhin konkret angezeigt und beenden
 weitere DB-Abfragen.
 
@@ -438,7 +423,7 @@ node test/angriffsplaner.browser.cjs
 
 Für den Browsertest werden Playwright und Microsoft Edge benötigt. Bei der
 gebündelten Playwright-Installation dessen Paketverzeichnis als `NODE_PATH` setzen.
-Die Tests verwenden simulierte Spielseiten und TWForge-Antworten, keine Zugangsdaten
+Die Tests verwenden simulierte Spielseiten und DB-Info-Antworten, keine Zugangsdaten
 und keine Spielbefehle. Kern- und Browsertests prüfen Truppenreservierungen,
 Fake-Mindestgrößen, Rollen, Zielvalidierung, Vorlagen, Berichtsalter und Verluste,
 Zeitzonenwechsel, Nachtbonus, beide Zeitfenster, Kapazität, Worker, WB-Roundtrip,
@@ -448,7 +433,6 @@ eindeutige Fake-Paare, Tarnfakes je Off-Dorf und höchstens 5 % Kraftverlust.
 Screenshots liegen unter
 `test/artifacts/angriffsplaner-desktop.png` und `test/artifacts/angriffsplaner-mobile.png`.
 
-Die Welt-Endpunkte wurden öffentlich gelesen. Die TWForge-Schnittstelle wurde mit
-dem bereitgestellten Schlüssel und den korrigierten Headern erfolgreich auf `de256`
-abgefragt. Der Endpunkttest prüft die Anfrage und das Antwortformat; ein Test der
-installierten Tampermonkey-Erweiterung im angemeldeten Spielaccount wurde nicht durchgeführt.
+Die Welt-Endpunkte wurden öffentlich gelesen. Die aktuelle DB-Info-Adresse wurde
+mit simulierten Antworten geprüft; ein Test der installierten Tampermonkey-
+Erweiterung im angemeldeten Spielaccount wurde nicht durchgeführt.
