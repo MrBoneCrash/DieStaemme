@@ -14,7 +14,7 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner (GitHub-Loader)
 // @namespace    local.die-staemme.loader.angriffsplaner
-// @version      1.0.3
+// @version      1.0.4
 // @description  Lädt die aktuelle GitHub-Version. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -57,6 +57,8 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 ```
 
 Die Anfrageberechtigung für `raw.githubusercontent.com` lädt die Datei; `marionettenaufstand.de` wird für DB-Info-Berichte benötigt. Erlaube diese Domains, wenn Tampermonkey danach fragt.
+
+Einen bereits installierten Loader durch Version **1.0.4** ersetzen. Die neue `@connect`-Freigabe wird nicht durch das Nachladen der eigentlichen Skriptdatei übernommen.
 
 Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler stehen in der Browserkonsole. **Die Nutzung erfolgt auf eigene Gefahr; auch zukünftige Änderungen aus `master` werden automatisch ausgeführt.**
 
