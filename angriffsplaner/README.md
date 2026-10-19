@@ -137,6 +137,70 @@ Angriffszahl und API-Schlüssel werden direkt beim Ändern lokal gespeichert,
 getrennt nach Host, Welt und Spieler. **Zeiträume und ihre Aktivierungscheckboxen
 werden nicht gespeichert** und beim nächsten Seitenaufruf frisch initialisiert.
 
+## AG-Modus: Cleaner, AG-Trains und Fakes
+
+Unter **Planungsmodus** lässt sich **AG-Modus** auswählen. Standard sind wie
+gewünscht **4 einzelne AG-Angriffe je Ziel**, jeweils mit genau **1 AG**. Die Zahl
+ist einstellbar. Die vorgegebenen Begleittruppen betragen **100 Äxte je AG-Angriff**;
+andere offensive Einheiten und Mengen können getrennt eingetragen werden.
+Diese Mengen werden viermal reserviert. Jede Welle benötigt vorhandene Truppen
+und muss das Weltlimit erfüllen. Die Mindest-Off-Mengen gelten für den Cleaner.
+
+Der Planer sucht möglichst viele **vollständige Eroberungspakete**:
+
+1. Eine große Cleaner-Off mit dem gesamten noch verfügbaren offensiven Bestand
+   eines Quelldorfs, abzüglich einer Tarnfake-Reserve von höchstens 5 % Angriffskraft.
+2. Vier AG-Wellen auf dasselbe Ziel; bei Bedarf aus mehreren eigenen Dörfern.
+   Dieselben AGs werden nicht für ein zweites Ziel verplant. Ein AG-Dorf darf
+   weitere vollständige Trains liefern, wenn AGs und Begleittruppen reichen.
+3. Fakes aus den Restbeständen. Quellen der Cleaner und AGs bevorzugen zusätzliche
+   Fakes auf andere Dörfer desselben Zielspielers. Die bisherigen Regeln gelten:
+   keine doppelten Fake-Quell-Ziel-Paare, keine Speere, bevorzugt Katapulte und
+   ein Späher, mindestens Weltlimit + 3 Einwohner. Echte AGs werden nicht in
+   Fake-Befehlen verbraucht.
+
+**Cleaner und alle AGs erhalten dieselbe Ankunftssekunde.** Der Cleaner liegt im
+Plan bei `.000`, die AG-Wellen ab `.001` mit dem weltseitigen Angriffsabstand.
+Bei 200 ms sind dies `.001`, `.201`, `.401` und `.601`. Der Cleaner muss zugleich
+mindestens den globalen Abschickabstand vor jeder AG-Welle starten. Deshalb muss
+seine Laufzeit länger sein; eine Cleaner-Off und ein langsamerer AG aus demselben
+Dorf erfüllen diese Vorgabe nicht. Unpassende Kombinationen werden ausgelassen.
+Zu enge Abschickfenster können trotz ausreichender Truppen alle Pakete verhindern.
+
+Der globale Abschickabstand gilt zwischen unabhängigen Paketen, Fakes sowie
+Cleaner und AGs. **Innerhalb desselben AG-Trains** gilt der weltseitige Abstand;
+sonst könnten mehrere AGs aus demselben Dorf nicht in derselben Sekunde ankommen.
+Passt die gewählte AG-Anzahl damit nicht in eine Sekunde, zeigt das Skript einen
+Fehler. Nachtbonus und beide Zeitfenster gelten für jede einzelne Welle.
+Im AG-Modus umfasst eine eingegebene Endsekunde das Ende dieser Sekunde (`.999`),
+damit auch ein Ankunftsfenster aus genau einer Sekunde einen Train aufnehmen kann.
+Die maximale AG-Reichweite kommt aus `snob > max_dist` der Weltkonfiguration.
+Bei fehlender Reichweite wird der AG-Modus nicht berechnet. Ein weltseitiges
+Verbot, Barbarendörfer zu adeln, wird berücksichtigt.
+
+Vor dem Erstellen zeigt die Kapazität die **vollständigen Trains und AG-Anzahl**.
+Der Anzahl-Slider beginnt mindestens bei der Zahl der bereits reservierten
+Cleaner-/AG-Befehle; Erhöhen ergänzt Fakes. Auch ein hoher Fake-Wunschanteil
+verdrängt diese Pakete nicht. Ohne vollständige Pakete können verbleibende
+Bestände weiterhin Fakes liefern. Die Zuordnung ist eine Heuristik und kein
+Beweis für das globale Maximum aller möglichen Eroberungen.
+
+Cleaner und AG-Wellen sind in allen Ansichten als Paket markiert. Eine Checkbox
+wählt immer das **ganze Paket**; auch **Paket-WB** kopiert Cleaner und alle AGs.
+Ab der ersten abgelaufenen Abschickzeit wird das komplette Paket für den Export
+gesperrt, damit kein halber Train ohne Cleaner entsteht. AG-Befehle haben im
+WB-Export Typ **11**, Cleaner Typ **2**, Fakes Typ **14**. Der Export erhält die
+Millisekunden der Planwerte. Das Skript verschickt weiterhin keine Befehle.
+
+**Die gemeinsame Sekunde ist keine Snipe-Garantie.** Tatsächliche Reihenfolge,
+Verzögerungen, gegnerische Unterstützung und der manuelle beziehungsweise native
+Train-Ablauf bleiben entscheidend. Die angezeigten Millisekunden sind Planwerte;
+sie werden nicht durch eine automatische Abschickfunktion durchgesetzt. Fakes
+können die Operation verschleiern, aber erkennbare AG-Laufzeiten nicht ändern.
+Auch vier erfolgreiche AGs garantieren keine Eroberung: Die Zustimmung sinkt
+normalerweise pro Angriff um 20–35 Punkte, abhängig von Welt und Boni.
+[InnoGames: Zustimmung eines Dorfes](https://support.innogames.com/kb/TribalWars/de_DE/1204).
+
 ## Eigene Bestände und Fake-Mindestgröße
 
 Die eigene Dorfmenge kommt aus `/map/village.txt`, gefiltert nach der angemeldeten

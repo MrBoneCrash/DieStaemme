@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.5.4
+// @version      1.6.0
 // @description  Plant Fakes und Offs aus eigenen Beständen mit TWForge-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -419,6 +419,7 @@
             arrival: nextDaylight(clamp(Math.max(d.lo, config.sendStart + d.duration), config.arrivalStart, config.arrivalEnd), world.night) }));
     }
     function plan(sources, targets, world, config, total, thorough = true) {
+        if (config.mode === 'ag') return planConquests(sources, targets, world, config, total);
         const options = anchors(sources, targets, world, config);
         if (!options.length || !total) return { rows: [], complete: total === 0, offCount: 0, fakeCount: 0, metrics: bounds([]) };
         let best = null;
@@ -473,6 +474,14 @@
         return Math.min(LIMIT, config.fakePercent === 100 ? fake : fake + off);
     }
     async function findCapacity(sources, targets, world, config, progress = async () => {}) {
+        if (config.mode === 'ag') {
+            await progress(0);
+            const conquestBase = buildConquests(sources, targets, world, config);
+            const upper = Math.min(LIMIT, conquestBase.rows.length + sources.length * targets.length);
+            const available = planConquests(sources, targets, world, { ...config, conquestBase }, upper);
+            return { maximum: available.rows.length, maxOffs: conquestBase.trainCount, maxTrains: conquestBase.trainCount,
+                minAttacks: conquestBase.rows.length, conquestBase, upper, limited: available.rows.length === LIMIT };
+        }
         const offPlan = plan(sources, targets, world, { ...config, fakePercent: 0, offOnly: true }, LIMIT);
         const maxOffs = offPlan.offCount;
         const upper = Math.min(capacityUpper(sources, world, config), sources.length * targets.length + maxOffs);
@@ -481,11 +490,168 @@
         const available = plan(sources, targets, world, { ...config, maxOffs }, upper);
         return { maximum: available.rows.length, maxOffs, upper, limited: upper === LIMIT };
     }
+    function noblePacket(stock, source, world, config) {
+        if (!world.units.snob || !(stock.snob > 0)) return null;
+        const troops = { snob: 1 };
+        for (const u of OFF) {
+            const n = config.agEscort?.[u] || 0;
+            if (n > 0) { if (!world.units[u] || (stock[u] || 0) < n) return null; troops[u] = n; }
+        }
+        const escort = { ...troops, snob: 0 };
+        return attack(escort, world) > 0 && population(troops, world) >= minimumPop(source, world) ? troops : null;
+    }
+    function betterRank(rank, best) {
+        if (!best) return true;
+        for (let i = 0; i < rank.length; i++) if (rank[i] !== best.rank[i]) return rank[i] > best.rank[i];
+        return false;
+    }
+    function scheduledRow(source, target, troops, type, world, config, extra = {}) {
+        const info = timing(source, target, troops, world, config);
+        return info ? { id: source.id, source: source.coords, sourceName: source.name, target, troops, type, ...info, ...extra } : null;
+    }
+    function scheduleBundle(rows, calendar, world, config) {
+        // Gemeinsame Ankunftssekunde, Cleaner bei .000, AGs ab .001 mit weltseitigem Abschickabstand.
+        const prepared = rows.map(r => ({ ...r, offset: r.offset || 0 }));
+        for (let i = 0; i < prepared.length; i++) for (let j = 0; j < i; j++) {
+            const a = prepared[i], b = prepared[j], noblePair = a.type === 'ag' && b.type === 'ag';
+            const gap = noblePair ? Math.max(1, Math.ceil(world.gap)) : config.gap;
+            if (Math.abs((a.offset - a.duration) - (b.offset - b.duration)) < gap) return null;
+        }
+        const cleaner = prepared.find(r => r.cleaner), nobles = prepared.filter(r => r.type === 'ag');
+        if (cleaner && nobles.some(r => cleaner.offset - cleaner.duration + config.gap > r.offset - r.duration)) return null;
+        let intervals = [[config.arrivalStart, config.arrivalEnd]];
+        for (const row of prepared) {
+            const shifted = row.intervals.map(([lo, hi]) => [lo - row.offset, hi - row.offset]);
+            intervals = intervals.flatMap(([a, b]) => shifted.map(([lo, hi]) => [Math.max(a, lo), Math.min(b, hi)]).filter(([lo, hi]) => lo <= hi));
+            if (!intervals.length) return null;
+        }
+        for (const [lo, hi] of intervals) {
+            let base = Math.ceil(lo / 1000) * 1000;
+            for (let attempt = 0; base <= hi && attempt <= calendar.length * prepared.length + 1; attempt++) {
+                let shift = 0;
+                for (const row of prepared) for (const old of calendar) {
+                    const launch = base + row.offset - row.duration;
+                    if (Math.abs(launch - old.launch) < config.gap) shift = Math.max(shift, old.launch + config.gap - launch);
+                }
+                if (shift > 0) { base = Math.ceil((base + shift) / 1000) * 1000; continue; }
+                const result = prepared.map(r => ({ ...r, arrival: base + r.offset, launch: base + r.offset - r.duration }));
+                if (result.every(r => !inNight(r.arrival, world.night))) return result;
+                break;
+            }
+        }
+        return null;
+    }
+    function buildConquests(sources, targets, world, config) {
+        const count = config.agPerTarget || 4, step = Math.max(1, Math.ceil(world.gap));
+        if (!world.units.snob) throw new Error('Diese Welt hat keine Adelsgeschlechter.');
+        if (!Number.isFinite(world.snobMaxDistance)) throw new Error('AG-Reichweite fehlt in der Weltkonfiguration.');
+        if (1 + (count - 1) * step > 999) throw new Error('AG-Anzahl und weltseitiger Angriffsabstand passen nicht in eine Ankunftssekunde.');
+        const stocks = sources.map(s => ({ ...s, troops: { ...s.troops } })), rows = [], usedCleaners = new Set(), captured = new Set();
+        let trainCount = 0;
+        while (rows.length + count + 1 <= LIMIT) {
+            if (stocks.reduce((sum, s) => sum + (s.role === 'fake' ? 0 : s.troops.snob || 0), 0) < count) break;
+            let best = null;
+            const remainingTargets = targets.filter(t => !captured.has(t.id) && !(world.noBarbConquer && Number(t.player) === 0));
+            const reach = (s, t) => !(world.snobMaxDistance > 0) || Math.hypot(s.x - t.x, s.y - t.y) <= world.snobMaxDistance;
+            const flexibility = new Map(stocks.map(s => [s.id, remainingTargets.filter(t => reach(s, t)).length]));
+            const availability = new Map(remainingTargets.map(t => [t.id, stocks.reduce((sum, s) => sum + (s.role !== 'fake' && reach(s, t) ? s.troops.snob || 0 : 0), 0)]));
+            for (const target of remainingTargets.sort((a, b) => availability.get(a.id) - availability.get(b.id))) {
+                if (captured.has(target.id) || world.noBarbConquer && Number(target.player) === 0) continue;
+                const availableDonors = stocks.filter(s => s.role !== 'fake' && s.troops.snob > 0 &&
+                    (!(world.snobMaxDistance > 0) || Math.hypot(s.x - target.x, s.y - target.y) <= world.snobMaxDistance))
+                    .sort((a, b) => flexibility.get(a.id) - flexibility.get(b.id) || Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y) || b.troops.snob - a.troops.snob || a.id - b.id);
+                const availableAGs = availableDonors.reduce((sum, s) => sum + s.troops.snob, 0);
+                if (availableAGs < count) continue;
+                for (const cleaner of stocks) {
+                    if (cleaner.role === 'fake' || usedCleaners.has(cleaner.id) || !meetsOff(cleaner.troops, world, config)) continue;
+                    if (availableAGs - (availableDonors.some(s => s.id === cleaner.id) ? cleaner.troops.snob : 0) < count) continue;
+                    const trial = new Map(), waves = [];
+                    const donors = availableDonors.filter(s => s.id !== cleaner.id);
+                    for (const donor of donors) {
+                        const stock = { ...donor.troops }; trial.set(donor.id, stock);
+                        while (waves.length < count) {
+                            const packet = noblePacket(stock, donor, world, config);
+                            if (!packet) break;
+                            const row = scheduledRow(donor, target, packet, 'ag', world, config, { bundle: target.id, wave: waves.length + 1, offset: 1 + waves.length * step });
+                            if (!row) break;
+                            // Der Cleaner muss später langsamer sein als jeder AG-Befehl; hier offensichtliche Unmöglichkeiten auslassen.
+                            const cleanFull = Object.fromEntries(OFF.filter(u => cleaner.troops[u] > 0).map(u => [u, cleaner.troops[u]]));
+                            const cleanInfo = timing(cleaner, target, cleanFull, world, config);
+                            if (!cleanInfo || cleanInfo.duration - row.duration + row.offset < config.gap) break;
+                            subtract(stock, packet); waves.push(row);
+                        }
+                        if (waves.length === count) break;
+                    }
+                    if (waves.length !== count) continue;
+                    let cleanStock = { ...cleaner.troops }, spent = 0;
+                    const power = offensivePopulation(cleanStock, world), fullPower = attack(Object.fromEntries(OFF.map(u => [u, cleanStock[u] || 0])), world);
+                    if (!power) continue;
+                    if (cleaner.role === 'both') for (let n = 0; n < Math.min(3, Math.max(0, targets.length - 1)); n++) {
+                        const mask = fakePacket(cleanStock, cleaner, world), next = { ...cleanStock };
+                        if (!mask) break; subtract(next, mask);
+                        if (!meetsOff(next, world, config) || !(next.ram || next.catapult) || spent + attack(mask, world) > fullPower * 0.05) break;
+                        spent += attack(mask, world); cleanStock = next;
+                    }
+                    function cleanPacket(stock) {
+                        const full = Object.fromEntries(OFF.filter(u => stock[u] > 0 && world.units[u]).map(u => [u, stock[u]]));
+                        const estimate = defense(target.report, full, world);
+                        return meetsOff(full, world, config) && population(full, world) >= minimumPop(cleaner, world) &&
+                            (estimate === null || attack(full, world) >= estimate * config.reserve / 100) ? full : null;
+                    }
+                    const packet = cleanPacket(cleanStock) || cleanPacket(cleaner.troops);
+                    if (!packet) continue;
+                    const cleanRow = scheduledRow(cleaner, target, packet, 'off', world, config, { bundle: target.id, cleaner: true, offset: 0 });
+                    if (!cleanRow) continue;
+                    const scheduled = scheduleBundle([cleanRow, ...waves], rows, world, config);
+                    if (!scheduled) continue;
+                    const afterCleaner = { ...cleaner.troops }; subtract(afterCleaner, packet); trial.set(cleaner.id, afterCleaner);
+                    const remainingAGs = stocks.reduce((sum, s) => sum + (s.role === 'fake' ? 0 : (trial.get(s.id) || s.troops).snob || 0), 0);
+                    const remainingCleaners = stocks.filter(s => s.role !== 'fake' && s.id !== cleaner.id && !usedCleaners.has(s.id) && meetsOff(trial.get(s.id) || s.troops, world, config)).length;
+                    const rank = [Math.min(Math.floor(remainingAGs / count), remainingCleaners), -availableAGs, target.report?.priority || 0, -scheduled[0].arrival];
+                    if (betterRank(rank, best)) best = { scheduled, trial, cleaner, target, rank };
+                }
+            }
+            if (!best) break;
+            for (const [id, stock] of best.trial) stocks.find(s => s.id === id).troops = stock;
+            rows.push(...best.scheduled); usedCleaners.add(best.cleaner.id); captured.add(best.target.id); trainCount++;
+        }
+        return { rows, stocks, trainCount };
+    }
+    function planConquests(sources, targets, world, config, total) {
+        const base = config.conquestBase || buildConquests(sources, targets, world, config);
+        const rows = base.rows.map(r => ({ ...r, troops: { ...r.troops } })), stocks = base.stocks.map(s => ({ ...s, troops: { ...s.troops } }));
+        const pairs = new Set(rows.map(r => `${r.id}:${r.target.id}`)), sourcePlayers = new Map(), hits = new Map(), masked = new Set();
+        rows.forEach(r => { if (!sourcePlayers.has(r.id)) sourcePlayers.set(r.id, new Set()); sourcePlayers.get(r.id).add(Number(r.target.player)); });
+        while (rows.length < total && rows.length < LIMIT) {
+            let best = null;
+            for (const source of stocks) {
+                if (!canFake(source, source.troops, world, config) && base.trainCount) continue;
+                const troops = fakePacket(source.troops, source, world);
+                if (!troops) continue;
+                for (const target of targets) {
+                    if (pairs.has(`${source.id}:${target.id}`)) continue;
+                    const row = scheduledRow(source, target, troops, 'fake', world, config);
+                    if (!row) continue;
+                    const scheduled = scheduleBundle([row], rows, world, config);
+                    if (!scheduled) continue;
+                    const same = Number(target.player) > 0 && sourcePlayers.get(source.id)?.has(Number(target.player));
+                    const rank = [sourcePlayers.has(source.id) && !masked.has(source.id) ? 1 : 0, same ? 1 : 0, -(hits.get(target.id) || 0), -scheduled[0].arrival];
+                    if (betterRank(rank, best)) best = { row: scheduled[0], source, rank, same };
+                }
+            }
+            if (!best) break;
+            subtract(best.source.troops, best.row.troops); rows.push(best.row); pairs.add(`${best.source.id}:${best.row.target.id}`);
+            hits.set(best.row.target.id, (hits.get(best.row.target.id) || 0) + 1); if (best.same) masked.add(best.source.id);
+        }
+        rows.sort((a, b) => a.launch - b.launch || a.arrival - b.arrival);
+        return { rows, complete: rows.length === total, offCount: base.trainCount, agCount: base.trainCount * (config.agPerTarget || 4),
+            trainCount: base.trainCount, fakeCount: rows.filter(r => r.type === 'fake').length, metrics: bounds(rows), fallbackFakes: 0 };
+    }
     // Dedicated worker: the allocation search must not freeze the game UI on large accounts.
     function workerSource() {
         const functions = [parts, formatTime, minimumPop, fakeMinimumPop, population, offensivePopulation, minimumOff, meetsOff, canFake, attack, fakePacket, defense, offPacket,
             inNight, nextDaylight, daytimeIntervals, timing, counts, clamp, subtract, chooseArrival, bounds,
-            allocate, compare, optimizeTimes, anchors, plan, capacityUpper, findCapacity];
+            allocate, compare, optimizeTimes, anchors, plan, capacityUpper, findCapacity, noblePacket, betterRank, scheduledRow, scheduleBundle, buildConquests, planConquests];
         return `'use strict';const OFF=${JSON.stringify(OFF)},FILL=${JSON.stringify(FILL)},DAY=${DAY},LIMIT=${LIMIT},timingCaches=new WeakMap();
             const formatter=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
             ${functions.map(fn => fn.toString()).join('\n')}
@@ -508,7 +674,10 @@
         }
         if (!units.ram && !units.catapult) throw new Error('Diese Welt hat keine unterstützten Belagerungseinheiten.');
         const gap = number(configDoc, 'commands > attack_gap');
-        return { fakeLimit, night: { active: !!active, start, end }, units, gap: Number.isFinite(gap) ? Math.max(1, gap) : 200 };
+        const snobMaxDistance = number(configDoc, 'snob > max_dist');
+        return { fakeLimit, night: { active: !!active, start, end }, units, gap: Number.isFinite(gap) ? Math.max(1, gap) : 200,
+            snobMaxDistance: Number.isFinite(snobMaxDistance) && snobMaxDistance >= 0 ? snobMaxDistance : null,
+            noBarbConquer: number(configDoc, 'snob > no_barb_conquer') === 1 };
     }
     function parsePlace(doc, units, expectedId) {
         const form = doc.querySelector('#command-data-form, form[action*="screen=place"]');
@@ -531,13 +700,13 @@
     }
     function workbench(row, encode = btoa) {
         // DS Workbench: Attack.FAKE_TYPE=14, Attack.CLEAN_TYPE=2 (StandardAttack / ImageManager).
-        const type = row.type === 'fake' ? 14 : 2;
+        const type = row.type === 'fake' ? 14 : row.type === 'ag' ? 11 : 2;
         return `${row.id}&${row.target.id}&${row.unit}&${row.arrival}&${type}&false&false&` +
             Object.entries(row.troops).filter(([, n]) => n > 0).map(([u, n]) => `${u}=${encode(String(n))}`).join('/') + '&1\n';
     }
     const core = { amount, parts, formatTime, parseTime, parseMap, resolveTargets, readTemplates, minimumPop, fakeMinimumPop, population, offensivePopulation, meetsOff, dbPayload, dbError,
         attack, fakePacket, normalizeReport, defense, offPacket, inNight, nextDaylight, daytimeIntervals, timing, counts,
-        bounds, plan, capacityUpper, findCapacity, parseWorld, parsePlace, workbench, workerSource, defaultWindows, persistentSettings, LIMIT };
+        bounds, plan, capacityUpper, findCapacity, noblePacket, scheduleBundle, buildConquests, planConquests, parseWorld, parsePlace, workbench, workerSource, defaultWindows, persistentSettings, LIMIT };
     if (typeof module === 'object' && module.exports) { module.exports = core; return; }
 
     const win = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -617,6 +786,8 @@
     }
     function rawSettings() {
         return { targets: $('[data-targets]').value, fakePercent: +$('[data-ratio]').value, template: $('[data-template]').value, resultView: $('[data-result-view]').value,
+            mode: $('[data-planning-mode]').value, agPerTarget: +$('[data-ag-count]').value,
+            agEscort: Object.fromEntries([...root.querySelectorAll('[data-ag-escort]')].map(e => [e.dataset.agEscort, e.value])),
             maxAge: $('[data-age]').value, reserve: $('[data-reserve]').value, gap: $('[data-gap]').value,
             minimumOffUnits: Object.fromEntries([...root.querySelectorAll('[data-min-off]')].map(e => [e.dataset.minOff, e.value])), apiKey: $('[data-db-key]').value.trim(), attackCount: desiredAttackCount,
             useSend: $('[data-use-send]').checked, useArrival: $('[data-use-arrival]').checked,
@@ -642,14 +813,22 @@
         if (!Number.isFinite(gap) || gap < 1000 || gap > 60000) throw new Error('Abschickabstand zwischen 1 und 60 Sekunden wählen.');
         const minimumOffUnits = Object.fromEntries(Object.entries(raw.minimumOffUnits).map(([u, n]) => [u, amount(n)]));
         if (Object.values(minimumOffUnits).some(n => !Number.isFinite(n) || n > 1000000)) throw new Error('Mindestmengen je Off-Einheit zwischen 0 und 1.000.000 wählen.');
+        const agEscort = Object.fromEntries(Object.entries(raw.agEscort).map(([u, n]) => [u, amount(n)]));
+        if (raw.mode === 'ag') {
+            if (!world.units.snob || !Number.isFinite(world.snobMaxDistance)) throw new Error('AGs oder AG-Reichweite fehlen in der Weltkonfiguration.');
+            if (!Number.isInteger(raw.agPerTarget) || raw.agPerTarget < 1 || raw.agPerTarget > 10) throw new Error('Zwischen 1 und 10 AG-Angriffe je Ziel wählen.');
+            if (Object.values(agEscort).some(n => !Number.isFinite(n) || n > 1000000) || !(attack(agEscort, world) > 0)) throw new Error('Gültige offensive Begleittruppen je AG eingeben.');
+            if (1 + (raw.agPerTarget - 1) * Math.max(1, Math.ceil(world.gap)) > 999) throw new Error('So viele AG-Angriffe passen beim weltseitigen Abstand nicht in eine Sekunde.');
+        }
+        const endPadding = raw.mode === 'ag' ? 999 : 0;
         const sendStart = raw.useSend ? Math.max(t, parseTime(raw.sendStart)) : t,
-            sendEnd = raw.useSend ? parseTime(raw.sendEnd) : t + 30 * DAY,
+            sendEnd = raw.useSend ? parseTime(raw.sendEnd) + endPadding : t + 30 * DAY,
             arrivalStart = raw.useArrival ? parseTime(raw.arrivalStart) : t,
-            arrivalEnd = raw.useArrival ? parseTime(raw.arrivalEnd) : sendEnd + 100 * DAY;
+            arrivalEnd = raw.useArrival ? parseTime(raw.arrivalEnd) + endPadding : sendEnd + 100 * DAY;
         if (sendStart > sendEnd || arrivalStart > arrivalEnd || arrivalEnd < t) throw new Error('Zeitfenster sind abgelaufen oder Anfang liegt hinter dem Ende.');
         if (sendEnd - sendStart > 31 * DAY || raw.useArrival && arrivalEnd - arrivalStart > 31 * DAY) throw new Error('Ein gewähltes Zeitfenster darf höchstens 31 Tage umfassen.');
         const { apiKey, ...planningSettings } = raw; // Schlüssel weder an Worker noch in den WB-Export weitergeben.
-        return { ...planningSettings, maxAge, reserve, minimumOffUnits, gap: Math.ceil(Math.max(world.gap, gap) / 1000) * 1000, sendStart, sendEnd, arrivalStart, arrivalEnd,
+        return { ...planningSettings, maxAge, reserve, minimumOffUnits, agEscort, gap: Math.ceil(Math.max(world.gap, gap) / 1000) * 1000, sendStart, sendEnd, arrivalStart, arrivalEnd,
             template: templates.find(t => t.id === raw.template) || null };
     }
     function validateTargets() {
@@ -748,22 +927,28 @@
         message(`TWForge-Verbindung erfolgreich (HTTP 200) · ${destination.coords}${report ? ' · aktueller Bericht verfügbar.' : ' · kein aktueller vollständiger Bericht verfügbar.'}`);
     }
     function span(ms) { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }
+    function planTime(time) { return formatTime(time) + (capacity?.config.mode === 'ag' ? `.${String(time % 1000).padStart(3, '0')}` : ''); }
+    function activeRows(time) {
+        const expired = new Set(result.rows.filter(r => r.bundle != null && r.launch <= time).map(r => r.bundle));
+        return result.rows.filter(r => r.launch > time && (r.bundle == null || !expired.has(r.bundle)));
+    }
     function renderResult() {
         const rows = result.rows, b = result.metrics;
         const covered = new Set(rows.filter(r => r.type === 'fake').map(r => r.target.id)).size;
         const offSources = new Set(rows.filter(r => r.type === 'off').map(r => r.id)), fakeSources = new Set(rows.filter(r => r.type === 'fake').map(r => r.id));
         const camouflaged = [...offSources].filter(id => fakeSources.has(id)).length;
-        $('[data-summary]').textContent = `${rows.length} Angriffe: ${result.fakeCount} Fakes + ${result.offCount} Offs · Abschickspanne ${span(b.launchSpan)} · Ankunftsspanne ${span(b.arrivalSpan)} · Fakes auf ${covered} / ${capacity.targets.length} Ziele${offSources.size ? ` · ${camouflaged} / ${offSources.size} Off-Dörfer mit Tarnfakes` : ''}${result.fallbackFakes > 0 ? ` · ${result.fallbackFakes} fehlende Offs durch Fakes ersetzt` : ''}`;
+        $('[data-summary]').textContent = `${rows.length} Angriffe: ${result.fakeCount} Fakes + ${result.offCount} ${result.trainCount != null ? `Cleaner + ${result.agCount} AGs · ${result.trainCount} vollständige Eroberungspakete` : 'Offs'} · Abschickspanne ${span(b.launchSpan)} · Ankunftsspanne ${span(b.arrivalSpan)} · Fakes auf ${covered} / ${capacity.targets.length} Ziele${offSources.size ? ` · ${camouflaged} / ${offSources.size} Off-Dörfer mit Tarnfakes` : ''}${result.fallbackFakes > 0 ? ` · ${result.fallbackFakes} fehlende Offs durch Fakes ersetzt` : ''}`;
         $('[data-result-tools]').hidden = false;
         $('[data-results]').innerHTML = rows.length ? `<table class="ds-table"><thead><tr><th>Auswahl</th><th>Art / Quelle</th><th>Ziel / Bericht</th><th>Truppen</th><th>Abschicken</th><th>Ankunft</th><th>Export</th></tr></thead><tbody>${rows.map((r, i) => {
             const report = r.target.report, link = report?.id ? `https://twforge.net/db-info?page=showReport&id=${encodeURIComponent(report.id)}&world=${encodeURIComponent(gd.world)}` : '';
-            return `<tr data-row="${i}"><td data-label="Auswahl"><input type="checkbox" data-result="${i}" ${r.selected ? 'checked' : ''} aria-label="${r.type === 'fake' ? 'Fake' : 'Off'} aus ${r.source} auswählen"></td>
-                <td data-label="Art / Quelle"><span class="ds-chip ${r.type === 'off' ? 'ds-off' : ''}">${r.type === 'off' ? 'Off' : 'Fake'}</span><strong>${escape(r.source)}</strong><small>${escape(r.sourceName)}</small></td>
+            const label = r.type === 'ag' ? `AG ${r.wave}/${capacity.config.agPerTarget}` : r.cleaner ? 'Cleaner' : r.type === 'off' ? 'Off' : 'Fake';
+            return `<tr data-row="${i}"><td data-label="Auswahl"><input type="checkbox" data-result="${i}" ${r.selected ? 'checked' : ''} aria-label="${label} aus ${r.source} auswählen"></td>
+                <td data-label="Art / Quelle"><span class="ds-chip ${r.type !== 'fake' ? 'ds-off' : ''}">${label}</span><strong>${escape(r.source)}</strong><small>${escape(r.sourceName)}</small>${r.bundle != null ? `<small>Paket ${r.bundle} · gemeinsam exportieren</small>` : ''}</td>
                 <td data-label="Ziel / Bericht"><a target="_blank" rel="noopener" href="${escape(gameURL('info_village', { id: r.target.id }))}">${r.target.coords}</a><small>${escape(r.target.name)}</small>
                 <small>${report ? `${report.category}${report.outsideAG ? ' · AG auswärts belegt' : ''} · ${formatTime(report.time)}` : 'Kein aktueller Bericht'}</small>${link ? `<a target="_blank" rel="noopener" href="${escape(link)}">Bericht ↗</a>` : ''}</td>
                 <td data-label="Truppen">${troopHTML(r.troops)}<small>${population(r.troops, world)} BH · ${NAMES[r.unit]} · ${r.distance.toFixed(2)} Felder</small></td>
-                <td data-label="Abschicken"><strong>${formatTime(r.launch)}</strong><small data-countdown></small></td><td data-label="Ankunft"><strong>${formatTime(r.arrival)}</strong></td>
-                <td data-label="Export"><button type="button" data-row-wb="${i}">WB kopieren</button></td></tr>`;
+                <td data-label="Abschicken"><strong>${planTime(r.launch)}</strong><small data-countdown></small></td><td data-label="Ankunft"><strong>${planTime(r.arrival)}</strong></td>
+                <td data-label="Export"><button type="button" data-row-wb="${i}">${r.bundle != null ? 'Paket-WB' : 'WB kopieren'}</button></td></tr>`;
         }).join('')}</tbody></table>` : '<div class="ds-empty">Keine vollständige Planung möglich. Zeitfenster erweitern oder Verhältnis ändern.</div>';
         const view = $('[data-result-view]').value;
         if (rows.length && view !== 'time') {
@@ -774,11 +959,11 @@
             $('[data-results]').replaceChildren();
             for (const { village, rows: entries } of [...groups.values()].sort((a, b) => a.village.coords.localeCompare(b.village.coords))) {
                 const group = document.createElement('details'); group.className = 'ds-plan-group'; group.dataset.group = String(village.id);
-                const offs = entries.filter(({ r }) => r.type === 'off').length, fakes = entries.length - offs;
+                const offs = entries.filter(({ r }) => r.type === 'off').length, ags = entries.filter(({ r }) => r.type === 'ag').length, fakes = entries.filter(({ r }) => r.type === 'fake').length;
                 const counterparts = new Set(entries.map(({ r }) => view === 'source' ? r.target.id : r.id)).size;
                 const b = bounds(entries.map(({ r }) => r));
                 const summary = document.createElement('summary');
-                summary.innerHTML = `<strong>${escape(village.coords)} · ${escape(village.name)}</strong><span class="ds-hint">${entries.length} Angriffe · ${offs} Offs + ${fakes} Fakes · ${counterparts} ${view === 'source' ? 'Zieldörfer' : 'Quelldörfer'}</span>${entries.length ? `<span class="ds-hint">Abschicken: ${formatTime(b.launchMin)} – ${formatTime(b.launchMax)}<br>Ankunft: ${formatTime(b.arrivalMin)} – ${formatTime(b.arrivalMax)}</span>` : '<span class="ds-hint">Keine Angriffe im Plan.</span>'}`;
+                summary.innerHTML = `<strong>${escape(village.coords)} · ${escape(village.name)}</strong><span class="ds-hint">${entries.length} Angriffe · ${offs} Offs + ${fakes} Fakes${ags ? ` + ${ags} AGs` : ''} · ${counterparts} ${view === 'source' ? 'Zieldörfer' : 'Quelldörfer'}</span>${entries.length ? `<span class="ds-hint">Abschicken: ${planTime(b.launchMin)} – ${planTime(b.launchMax)}<br>Ankunft: ${planTime(b.arrivalMin)} – ${planTime(b.arrivalMax)}</span>` : '<span class="ds-hint">Keine Angriffe im Plan.</span>'}`;
                 group.append(summary);
                 if (entries.length) {
                     const table = document.createElement('table'); table.className = 'ds-table'; table.append(heading.cloneNode(true));
@@ -792,13 +977,14 @@
     function tick() {
         if (!result) { $('[data-wb]').disabled = true; return; }
         let time; try { time = now(); } catch { $('[data-wb]').disabled = true; return; }
+        const active = activeRows(time), activeSet = new Set(active);
         root.querySelectorAll('[data-row]').forEach(e => {
-            const r = result.rows[+e.dataset.row], expired = r.launch <= time;
+            const r = result.rows[+e.dataset.row], expired = !activeSet.has(r);
             e.classList.toggle('ds-expired', expired);
             e.querySelector('[data-countdown]').textContent = expired ? 'Abgelaufen' : `in ${span(r.launch - time)}`;
             e.querySelector('[data-result]').disabled = busy || expired; e.querySelector('[data-row-wb]').disabled = busy || expired;
         });
-        const active = result.rows.filter(r => r.launch > time), selected = active.filter(r => r.selected);
+        const selected = active.filter(r => r.selected);
         $('[data-wb]').disabled = busy || !selected.length;
         $('[data-wb]').textContent = `WB kopieren (${selected.length})`;
         const all = $('[data-all-results]');
@@ -806,6 +992,9 @@
     }
     async function copy(rows) {
         if (!rows.length) throw new Error('Keine noch abschickbaren Befehle ausgewählt.');
+        const chosen = new Set(rows), active = new Set(activeRows(now()));
+        if (rows.some(r => !active.has(r) || r.bundle != null && result.rows.some(other => other.bundle === r.bundle && !chosen.has(other))))
+            throw new Error('Cleaner und AG-Train nur vollständig und vor der ersten Abschickzeit exportieren.');
         const field = $('[data-export]'); field.value = rows.map(r => workbench(r)).join(''); $('[data-export-wrap]').hidden = false;
         try { await navigator.clipboard.writeText(field.value); message(`${rows.length} Workbench-Befehle kopiert.`); }
         catch { field.focus(); field.select(); message('WB-Code steht zum Kopieren bereit: Strg+C.'); }
@@ -832,12 +1021,14 @@
         const selected = sources.filter(s => selectedIds.has(s.id));
         const estimated = await compute('capacity', selected, targets, config);
         if (mine !== generation) return;
-        capacity = { ...estimated, config: { ...config, maxOffs: estimated.maxOffs }, sources: selected.map(s => ({ ...s, troops: { ...s.troops } })),
+        capacity = { ...estimated, config: { ...config, maxOffs: estimated.maxOffs, ...(estimated.conquestBase ? { conquestBase: estimated.conquestBase } : {}) }, sources: selected.map(s => ({ ...s, troops: { ...s.troops } })),
             targets: targets.map(t => ({ ...t })), time: now(), reportInfo };
-        $('[data-maximum]').textContent = `${estimated.maximum.toLocaleString('de-DE')} Angriffe · maximal ${estimated.maxOffs} Offs`;
+        $('[data-maximum]').textContent = `${estimated.maximum.toLocaleString('de-DE')} Angriffe · ${config.mode === 'ag' ? `${estimated.maxTrains} vollständige AG-Trains (${estimated.maxTrains * config.agPerTarget} AGs)` : `maximal ${estimated.maxOffs} Offs`}`;
+        $('[data-count]').min = String(Math.max(1, estimated.minAttacks || 1));
         $('[data-count]').max = String(Math.max(1, estimated.maximum));
-        const ratioCount = estimated.maxOffs && config.fakePercent < 100 ? Math.round(estimated.maxOffs / (1 - config.fakePercent / 100)) : estimated.maximum;
-        $('[data-count]').value = String(clamp(Number.isInteger(preferredCount) && preferredCount > 0 ? preferredCount : ratioCount, 1, Math.max(1, estimated.maximum)));
+        const essential = estimated.minAttacks || estimated.maxOffs;
+        const ratioCount = essential && config.fakePercent < 100 ? Math.round(essential / (1 - config.fakePercent / 100)) : estimated.maximum;
+        $('[data-count]').value = String(clamp(Number.isInteger(preferredCount) && preferredCount > 0 ? preferredCount : ratioCount, Math.max(1, estimated.minAttacks || 1), Math.max(1, estimated.maximum)));
         desiredAttackCount = +$('[data-count]').value;
         updateCounts(); renderSources(); await previewPlan();
         $('[data-summary]').textContent = `${reportInfo.fresh} aktuelle Berichte · ${reportInfo.missing} Ziele ohne aktuelle Daten${reportInfo.failed ? ` · ${reportInfo.failed} DB-Abfragen fehlgeschlagen (als unbekannt geplant)` : ''}. ${estimated.limited ? `Rechenlimit: ${LIMIT.toLocaleString('de-DE')} Angriffe. ` : ''}Kapazität unter diesen Einstellungen: ${estimated.maximum}.`;
@@ -846,8 +1037,8 @@
     }
     function updateCounts() {
         const total = +$('[data-count]').value, ratio = +$('[data-ratio]').value;
-        $('[data-ratio-label]').textContent = `${ratio} % Fakes · ${100 - ratio} % Offs (Wunsch)`;
-        $('[data-count-label]').textContent = !capacity ? 'Kapazität noch nicht berechnet' : capacity.maximum === 0 ? '0 Angriffe möglich' : preview ? `${preview.rows.length.toLocaleString('de-DE')} Angriffe · ${preview.fakeCount} Fakes + ${preview.offCount} Offs` : `${total.toLocaleString('de-DE')} Angriffe · Vorschau nach Loslassen`;
+        $('[data-ratio-label]').textContent = `${ratio} % Fakes · ${100 - ratio} % ${$('[data-planning-mode]').value === 'ag' ? 'Cleaner / AGs' : 'Offs'} (Wunsch)`;
+        $('[data-count-label]').textContent = !capacity ? 'Kapazität noch nicht berechnet' : capacity.maximum === 0 ? '0 Angriffe möglich' : preview ? `${preview.rows.length.toLocaleString('de-DE')} Angriffe · ${preview.fakeCount} Fakes + ${preview.offCount} ${preview.trainCount != null ? `Cleaner + ${preview.agCount} AGs (${preview.trainCount} Trains)` : 'Offs'}` : `${total.toLocaleString('de-DE')} Angriffe · Vorschau nach Loslassen`;
     }
     async function previewPlan() {
         if (!capacity?.maximum) return;
@@ -856,8 +1047,8 @@
         const total = +$('[data-count]').value;
         preview = await compute('plan', capacity.sources, capacity.targets, capacity.config, total);
         updateCounts();
-        if (!preview.complete) message(`Es passen ${preview.offCount} Offs + ${preview.fakeCount} Fakes. Angriffszahl reduzieren; Offs werden nicht durch Fakes verdrängt.`, true);
-        else message(`Vorschau bereit: ${preview.offCount} Offs fest reserviert, ${preview.fakeCount} Fakes.`);
+        if (!preview.complete) message(`Es passen ${preview.offCount} ${preview.trainCount != null ? 'Cleaner' : 'Offs'}${preview.agCount ? ` + ${preview.agCount} AGs` : ''} + ${preview.fakeCount} Fakes. Angriffszahl reduzieren; reservierte Pakete werden nicht durch Fakes verdrängt.`, true);
+        else message(`Vorschau bereit: ${preview.trainCount != null ? `${preview.trainCount} vollständige AG-Trains` : `${preview.offCount} Offs`} fest reserviert, ${preview.fakeCount} Fakes.`);
     }
     async function makePlan() {
         if (!capacity?.maximum) throw new Error('Zuerst Kapazität berechnen.');
@@ -1065,6 +1256,14 @@
     </style>
     <details class="ds-planner-toggle" data-planner-toggle><summary>Angriffsplaner</summary>
     <div class="ds-body">
+        <label>Planungsmodus<select data-planning-mode><option value="standard">Offs + Fakes</option><option value="ag">AG-Modus: Cleaner + AG-Trains + Fakes</option></select></label>
+        <div data-ag-options hidden>
+        <div class="ds-fields"><label>AG-Angriffe je Ziel<input type="number" data-ag-count min="1" max="10" value="4"></label><p class="ds-hint">Je AG-Angriff genau 1 Adelsgeschlecht. Ein Paket enthält 1 große Cleaner-Off und einen vollständigen Train. AGs können aus mehreren eigenen Dörfern stammen.</p></div>
+        <p><strong>Begleittruppen pro einzelnem AG-Angriff</strong></p><div class="ds-fields">${OFF.filter(u => units.includes(u)).map(u => `<label>${NAMES[u]}<input type="number" data-ag-escort="${u}" min="0" max="1000000" value="${u === 'axe' ? 100 : 0}"></label>`).join('')}</div>
+        <p class="ds-hint">Cleaner und alle AGs werden auf dieselbe Ankunftssekunde geplant; der Cleaner wird vorher abgeschickt und trifft zuerst ein. Dafür braucht der Cleaner eine längere Laufzeit als die AGs. Die Mindest-Off-Mengen gelten für den Cleaner, die Begleitmengen getrennt für jeden AG-Angriff.</p>
+        <p class="ds-hint">Innerhalb eines AG-Trains gilt der weltseitige Angriffsabstand statt des globalen Sekundenabstands. Pakete werden nur gemeinsam ausgewählt und exportiert. Abschicken erfolgt manuell über das Spiel bzw. deinen WB-Ablauf; das Skript verschickt keine Befehle. Vier AGs garantieren keine Eroberung. Gemeinsame Sekunden und Fakes garantieren keine Snipe-Sicherheit; AG-Laufzeiten können erkennbar bleiben.</p>
+        <p class="ds-hint">Zuerst möglichst viele vollständige Eroberungspakete, danach Fakes aus Restbeständen. Der Anzahl-Slider unterschreitet die reservierten Pakete nicht; der Fake-Prozentsatz verdrängt im AG-Modus keine AGs.</p>
+        </div>
         <h3>Ziele & Verhältnis <span class="ds-result-count" data-target-count>0 Zieldörfer</span></h3>
         <div class="ds-fields"><label class="ds-target-field">Spieler, Stammname oder Dorfkoordinaten<textarea data-targets rows="3" placeholder="Spielername; Stammname oder Stamm-Tag; 500|500&#10;Ein Eintrag pro Zeile ist ebenfalls möglich." aria-describedby="ds-attack-validation"></textarea></label>
         <div><label>Fake-Anteil <strong data-ratio-label></strong><input type="range" data-ratio min="0" max="100" value="70"></label>
@@ -1117,7 +1316,7 @@
             $('[data-wb]').disabled = true; updateCounts(); persist();
             return;
         }
-        if (event.target.matches('[data-targets], [data-ratio], [data-age], [data-reserve], [data-gap], [data-min-off], [data-db-key], [data-send-start], [data-send-end], [data-arrival-start], [data-arrival-end]')) {
+        if (event.target.matches('[data-targets], [data-ratio], [data-age], [data-reserve], [data-gap], [data-min-off], [data-ag-count], [data-ag-escort], [data-db-key], [data-send-start], [data-send-end], [data-arrival-start], [data-arrival-end]')) {
             invalidate(); updateCounts(); persist();
             if (event.target.matches('[data-targets]')) { clearTimeout(validationTimer); validationTimer = setTimeout(validateTargets, 180); }
         }
@@ -1126,9 +1325,14 @@
         const e = event.target;
         if (e.matches('[data-count]')) { run(previewPlan); return; }
         if (e.matches('[data-result-view]')) { if (result) renderResult(); persist(); return; }
+        if (e.matches('[data-planning-mode]')) { $('[data-ag-options]').hidden = e.value !== 'ag'; desiredAttackCount = null; updateCounts(); }
         if (e.matches('[data-result], [data-all-results]')) {
             if (e.matches('[data-all-results]')) { for (const r of result.rows) r.selected = e.checked; root.querySelectorAll('[data-result]').forEach(c => { c.checked = e.checked; }); }
-            else result.rows[+e.dataset.result].selected = e.checked;
+            else {
+                const row = result.rows[+e.dataset.result];
+                for (const r of result.rows) if (r === row || row.bundle != null && r.bundle === row.bundle) r.selected = e.checked;
+                root.querySelectorAll('[data-result]').forEach(c => { c.checked = result.rows[+c.dataset.result].selected; });
+            }
             $('[data-export-wrap]').hidden = true; tick(); return;
         }
         if (e.matches('[data-source]')) { sources.find(s => s.id === +e.dataset.source).selected = e.checked; renderSources(); }
@@ -1148,7 +1352,8 @@
         else if (b.matches('[data-cancel]')) cancelCompute?.();
         else if (b.matches('[data-all-sources], [data-no-sources]')) { sources.forEach(s => { s.selected = b.matches('[data-all-sources]'); }); invalidate(); renderSources(); persist(); }
         else if (b.matches('[data-wb], [data-row-wb]')) run(async () => {
-            const rows = b.matches('[data-row-wb]') ? [result.rows[+b.dataset.rowWb]].filter(r => r.launch > now()) : result.rows.filter(r => r.selected && r.launch > now());
+            const active = activeRows(now()), row = b.matches('[data-row-wb]') ? result.rows[+b.dataset.rowWb] : null;
+            const rows = row ? active.filter(r => r === row || row.bundle != null && r.bundle === row.bundle) : active.filter(r => r.selected);
             await copy(rows);
         });
     });
@@ -1159,6 +1364,10 @@
         for (const [k, selector] of Object.entries({ targets: 'targets', fakePercent: 'ratio', maxAge: 'age', reserve: 'reserve', gap: 'gap' }))
             if (values[k] != null) $(`[data-${selector}]`).value = values[k];
         root.querySelectorAll('[data-min-off]').forEach(e => { if (values.minimumOffUnits?.[e.dataset.minOff] != null) e.value = values.minimumOffUnits[e.dataset.minOff]; });
+        if (['standard', 'ag'].includes(values.mode)) $('[data-planning-mode]').value = values.mode;
+        if (Number.isInteger(values.agPerTarget) && values.agPerTarget >= 1 && values.agPerTarget <= 10) $('[data-ag-count]').value = values.agPerTarget;
+        root.querySelectorAll('[data-ag-escort]').forEach(e => { if (values.agEscort?.[e.dataset.agEscort] != null) e.value = values.agEscort[e.dataset.agEscort]; });
+        $('[data-ag-options]').hidden = $('[data-planning-mode]').value !== 'ag';
         if (['time', 'source', 'target'].includes(values.resultView)) $('[data-result-view]').value = values.resultView;
         for (const [k, selector] of Object.entries({ useDB: 'db' }))
             if (values[k] != null) $(`[data-${selector}]`).checked = !!values[k];
