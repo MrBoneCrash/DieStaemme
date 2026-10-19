@@ -8,7 +8,7 @@
 // @exclude      /^[^?]+\?(?:[^#]*&)?(screen|mode)=[^#]*&\1=/
 // @grant        unsafeWindow
 // @grant        GM_xmlhttpRequest
-// @connect      twforge.net
+// @connect      marionettenaufstand.de
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -876,7 +876,7 @@
         renderSources();
     }
     function dbRequest(target, apiKey) {
-        const url = `https://twforge.net/api/db-info/userscript?action=tribalwars&world=${encodeURIComponent(gd.world)}`;
+        const url = 'https://marionettenaufstand.de/api/userscript/db-info';
         // Nur der konfigurierte TWForge-Endpunkt erhält den Schlüssel, keine fremden serverConfig-URLs.
         // Der TWForge-Endpunkt erwartet Multipart wie das offizielle DB-Info-Skript.
         const boundary = `dsplanner${crypto.randomUUID().replace(/-/g, '')}`;
@@ -940,7 +940,7 @@
         $('[data-summary]').textContent = `${rows.length} Angriffe: ${result.fakeCount} Fakes + ${result.offCount} ${result.trainCount != null ? `Cleaner + ${result.agCount} AGs · ${result.trainCount} vollständige Eroberungspakete` : 'Offs'} · Abschickspanne ${span(b.launchSpan)} · Ankunftsspanne ${span(b.arrivalSpan)} · Fakes auf ${covered} / ${capacity.targets.length} Ziele${offSources.size ? ` · ${camouflaged} / ${offSources.size} Off-Dörfer mit Tarnfakes` : ''}${result.fallbackFakes > 0 ? ` · ${result.fallbackFakes} fehlende Offs durch Fakes ersetzt` : ''}`;
         $('[data-result-tools]').hidden = false;
         $('[data-results]').innerHTML = rows.length ? `<table class="ds-table"><thead><tr><th>Auswahl</th><th>Art / Quelle</th><th>Ziel / Bericht</th><th>Truppen</th><th>Abschicken</th><th>Ankunft</th><th>Export</th></tr></thead><tbody>${rows.map((r, i) => {
-            const report = r.target.report, link = report?.id ? `https://twforge.net/db-info?page=showReport&id=${encodeURIComponent(report.id)}&world=${encodeURIComponent(gd.world)}` : '';
+            const report = r.target.report, link = report?.id ? `https://marionettenaufstand.de/worlds/de256/24/berichte/bericht/${encodeURIComponent(report.id)}` : '';
             const label = r.type === 'ag' ? `AG ${r.wave}/${capacity.config.agPerTarget}` : r.cleaner ? 'Cleaner' : r.type === 'off' ? 'Off' : 'Fake';
             return `<tr data-row="${i}"><td data-label="Auswahl"><input type="checkbox" data-result="${i}" ${r.selected ? 'checked' : ''} aria-label="${label} aus ${r.source} auswählen"></td>
                 <td data-label="Art / Quelle"><span class="ds-chip ${r.type !== 'fake' ? 'ds-off' : ''}">${label}</span><strong>${escape(r.source)}</strong><small>${escape(r.sourceName)}</small>${r.bundle != null ? `<small>Paket ${r.bundle} · gemeinsam exportieren</small>` : ''}</td>

@@ -22,7 +22,7 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
-// @connect      twforge.net
+// @connect      marionettenaufstand.de
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -56,7 +56,7 @@ Bei jedem vollständigen Aufruf einer dieser Seiten wird die aktuelle auf GitHub
 })();
 ```
 
-Die Anfrageberechtigung für `raw.githubusercontent.com` lädt die Datei; `twforge.net` wird für TWForge-Berichte benötigt. Erlaube diese Domains, wenn Tampermonkey danach fragt.
+Die Anfrageberechtigung für `raw.githubusercontent.com` lädt die Datei; `marionettenaufstand.de` wird für TWForge-Berichte benötigt. Erlaube diese Domains, wenn Tampermonkey danach fragt.
 
 Ohne erreichbares GitHub startet keine gespeicherte Ersatzversion. Ladefehler stehen in der Browserkonsole. **Die Nutzung erfolgt auf eigene Gefahr; auch zukünftige Änderungen aus `master` werden automatisch ausgeführt.**
 
@@ -71,7 +71,7 @@ einen DS-Util / DS-Workbench-Importcode. Es schickt keine Angriffe ab.
 ## Installation und Bedienung
 
 1. Den Inhalt von `angriffsplaner.user.js` als neues Skript in Tampermonkey
-   speichern. Die Berechtigung für `twforge.net` wird für die Berichtsanalyse benötigt.
+   speichern. Die Berechtigung für `marionettenaufstand.de` wird für die Berichtsanalyse benötigt.
 2. Den **Versammlungsplatz** öffnen. Oberhalb des bisherigen Seiteninhalts steht die
    eingeklappte Leiste **Angriffsplaner**. Zum Benutzen die Leiste anklicken.
 3. Ziele eingeben: Spielernamen, Stammnamen/-Tags und Dorfkoordinaten, getrennt durch Zeilenumbrüche,
@@ -309,7 +309,7 @@ Der Planer lädt dieses Fremdskript nicht nach. Er verwendet nur dessen
 Berichtsschnittstelle:
 
 ```text
-POST https://twforge.net/api/db-info/userscript?action=tribalwars&world=<aktuelle Welt>
+POST https://marionettenaufstand.de/api/userscript/db-info
 Felder: Key, X, Y
 ```
 
