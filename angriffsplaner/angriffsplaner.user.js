@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.6.6
+// @version      1.6.7
 // @description  Plant Fakes und Offs aus eigenen Beständen mit DB-Info-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -645,11 +645,28 @@
         if (!Number.isFinite(world.snobMaxDistance)) throw new Error('AG-Reichweite fehlt in der Weltkonfiguration.');
         if (millis && first + (count - 1) * step > 999) throw new Error('AG-Anzahl und weltseitiger Angriffsabstand passen nicht in eine Ankunftssekunde.');
         const stocks = sources.map(s => ({ ...s, troops: { ...s.troops } })), rows = [], usedCleaners = new Set(), captured = new Set();
-        let trainCount = 0;
+        let trainCount = 0, failures = new Map();
+        function fail(code, message, target) {
+            if (!failures.has(code)) failures.set(code, { code, message, targets: new Set() });
+            if (target) failures.get(code).targets.add(target.coords || `${target.x}|${target.y}`);
+        }
+        function timingFailure(source, target, troops, kind) {
+            const duration = Math.round(Math.hypot(source.x - target.x, source.y - target.y) * Math.max(...Object.keys(troops).map(u => world.units[u].speed)) * 60) * 1000;
+            const fits = Math.max(config.arrivalStart, config.sendStart + duration) <= Math.min(config.arrivalEnd, config.sendEnd + duration);
+            fail(fits ? 'night' : 'windows', fits ? `${kind}: Im möglichen Ankunftszeitraum liegt Nachtbonus.`
+                : `${kind}: Laufzeit passt nicht gleichzeitig in Abschick- und Ankunftsfenster.`, target);
+        }
         while (rows.length + count + 1 <= LIMIT) {
-            if (stocks.reduce((sum, s) => sum + (s.role === 'fake' ? 0 : s.troops.snob || 0), 0) < count) break;
+            failures = new Map();
+            const outstanding = targets.filter(t => !captured.has(t.id));
+            if (!outstanding.length) break;
+            for (const t of outstanding) if (world.noBarbConquer && Number(t.player) === 0)
+                fail('barbarian', 'Die Welteinstellung verbietet das Adeln von Barbarendörfern.', t);
+            const remainingTargets = outstanding.filter(t => !(world.noBarbConquer && Number(t.player) === 0));
+            if (!remainingTargets.length) break;
+            const remainingNobles = stocks.reduce((sum, s) => sum + (s.role === 'fake' ? 0 : s.troops.snob || 0), 0);
+            if (remainingNobles < count) { fail('nobles', `Noch verfügbare Adelsgeschlechter in den für AGs freigegebenen Quelldörfern: ${remainingNobles}; benötigt werden ${count} je Ziel.`); break; }
             let best = null;
-            const remainingTargets = targets.filter(t => !captured.has(t.id) && !(world.noBarbConquer && Number(t.player) === 0));
             const reach = (s, t) => !(world.snobMaxDistance > 0) || Math.hypot(s.x - t.x, s.y - t.y) <= world.snobMaxDistance;
             const flexibility = new Map(stocks.map(s => [s.id, remainingTargets.filter(t => reach(s, t)).length]));
             const availability = new Map(remainingTargets.map(t => [t.id, stocks.reduce((sum, s) => sum + (s.role !== 'fake' && reach(s, t) ? s.troops.snob || 0 : 0), 0)]));
@@ -659,23 +676,39 @@
                     (!(world.snobMaxDistance > 0) || Math.hypot(s.x - target.x, s.y - target.y) <= world.snobMaxDistance))
                     .sort((a, b) => flexibility.get(a.id) - flexibility.get(b.id) || Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y) || b.troops.snob - a.troops.snob || a.id - b.id);
                 const availableAGs = availableDonors.reduce((sum, s) => sum + s.troops.snob, 0);
-                if (availableAGs < count) continue;
+                if (availableAGs < count) { fail('range', `Nicht genügend AGs innerhalb der weltseitigen AG-Reichweite (${world.snobMaxDistance} Felder).`, target); continue; }
+                let eligibleCleaner = false;
                 for (const cleaner of stocks) {
                     if (cleaner.role === 'fake' || usedCleaners.has(cleaner.id) || !meetsOff(cleaner.troops, world, config)) continue;
-                    if (availableAGs - (availableDonors.some(s => s.id === cleaner.id) ? cleaner.troops.snob : 0) < count) continue;
+                    eligibleCleaner = true;
+                    if (availableAGs - (availableDonors.some(s => s.id === cleaner.id) ? cleaner.troops.snob : 0) < count) {
+                        fail('separate-sources', 'Nicht genügend AGs außerhalb des Cleaner-Dorfes; Cleaner und AGs benötigen getrennte Quelldörfer.', target); continue;
+                    }
                     const trial = new Map(), waves = [];
                     const donors = availableDonors.filter(s => s.id !== cleaner.id);
                     for (const donor of donors) {
                         const stock = { ...donor.troops }; trial.set(donor.id, stock);
                         while (waves.length < count) {
                             const packet = noblePacket(stock, donor, world, config);
-                            if (!packet) break;
+                            if (!packet) {
+                                if (stock.snob > 0) {
+                                    const missing = OFF.filter(u => (config.agEscort?.[u] || 0) > (stock[u] || 0))
+                                        .map(u => `${NAMES[u] || u}: ${stock[u] || 0}/${config.agEscort[u]}`);
+                                    fail(missing.length ? 'escort' : 'ag-population', missing.length
+                                        ? `Begleittruppen fehlen, z. B. in ${donor.coords}: ${missing.join(', ')} (vorhanden/benötigt).`
+                                        : 'Die AG-Welle mit den eingestellten Begleittruppen erreicht die weltseitige Mindest-Einwohnerzahl nicht.', target);
+                                }
+                                break;
+                            }
                             const row = scheduledRow(donor, target, packet, 'ag', world, config, { bundle: target.id, wave: waves.length + 1, offset: first + waves.length * step });
-                            if (!row) break;
+                            if (!row) { timingFailure(donor, target, packet, 'AG'); break; }
                             // Der Cleaner muss später langsamer sein als jeder AG-Befehl; hier offensichtliche Unmöglichkeiten auslassen.
                             const cleanFull = Object.fromEntries(OFF.filter(u => cleaner.troops[u] > 0).map(u => [u, cleaner.troops[u]]));
                             const cleanInfo = timing(cleaner, target, cleanFull, world, config);
-                            if (!cleanInfo || millis && cleanInfo.duration - row.duration + row.offset < config.gap) break;
+                            if (!cleanInfo) { timingFailure(cleaner, target, cleanFull, 'Cleaner'); break; }
+                            if (millis && cleanInfo.duration - row.duration + row.offset < config.gap) {
+                                fail('launch-order', 'Kein passender Cleaner kann bei gemeinsamer Ankunftssekunde vor allen AGs abgeschickt werden (Laufzeit / Abschickabstand).', target); break;
+                            }
                             subtract(stock, packet); waves.push(row);
                         }
                         if (waves.length === count) break;
@@ -697,11 +730,17 @@
                             (estimate === null || attack(full, world) >= estimate * config.reserve / 100) ? full : null;
                     }
                     const packet = cleanPacket(cleanStock) || cleanPacket(cleaner.troops);
-                    if (!packet) continue;
+                    if (!packet) {
+                        const full = Object.fromEntries(OFF.filter(u => cleaner.troops[u] > 0).map(u => [u, cleaner.troops[u]]));
+                        const tooSmall = population(full, world) < minimumPop(cleaner, world);
+                        fail(tooSmall ? 'cleaner-population' : 'cleaner-strength', tooSmall
+                            ? 'Die Cleaner-Off erreicht die weltseitige Mindest-Einwohnerzahl für einen Angriff nicht.'
+                            : 'Die Cleaner-Off ist laut aktuellem Bericht einschließlich eingestellter Kraftreserve zu schwach.', target); continue;
+                    }
                     const cleanRow = scheduledRow(cleaner, target, packet, 'off', world, config, { bundle: target.id, cleaner: true, offset: 0 });
-                    if (!cleanRow) continue;
+                    if (!cleanRow) { timingFailure(cleaner, target, packet, 'Cleaner'); continue; }
                     const scheduled = scheduleBundle([cleanRow, ...waves], rows, world, config);
-                    if (!scheduled) continue;
+                    if (!scheduled) { fail('bundle-timing', 'Kein gemeinsamer Termin für ein vollständiges Paket: Zeitfenster, Nachtbonus, Abschickreihenfolge oder Abstände zu anderen Angriffen verhindern den Train.', target); continue; }
                     const afterCleaner = { ...cleaner.troops }; subtract(afterCleaner, packet); trial.set(cleaner.id, afterCleaner);
                     const remainingAGs = stocks.reduce((sum, s) => sum + (s.role === 'fake' ? 0 : (trial.get(s.id) || s.troops).snob || 0), 0);
                     const remainingCleaners = stocks.filter(s => s.role !== 'fake' && s.id !== cleaner.id && !usedCleaners.has(s.id) && meetsOff(trial.get(s.id) || s.troops, world, config)).length;
@@ -711,12 +750,15 @@
                         Math.min(Math.floor(remainingAGs / count), remainingCleaners), -availableAGs, target.report?.priority || 0, -scheduled[0].arrival];
                     if (betterRank(rank, best)) best = { scheduled, trial, cleaner, target, rank };
                 }
+                if (!eligibleCleaner) fail('cleaner', 'Keine unbenutzte, für Offs freigegebene Cleaner-Off erfüllt die eingestellten Mindestmengen je Off-Einheit.', target);
             }
             if (!best) break;
             for (const [id, stock] of best.trial) stocks.find(s => s.id === id).troops = stock;
             rows.push(...best.scheduled); usedCleaners.add(best.cleaner.id); captured.add(best.target.id); trainCount++;
         }
-        return { rows, stocks, trainCount };
+        if (rows.length + count + 1 > LIMIT && captured.size < targets.length) fail('limit', `Das Rechenlimit von ${LIMIT} Angriffen verhindert weitere vollständige Pakete.`);
+        if (captured.size === targets.length) failures.clear();
+        return { rows, stocks, trainCount, diagnostics: [...failures.values()].map(f => ({ ...f, targets: [...f.targets] })) };
     }
     function planConquests(sources, targets, world, config, total) {
         const base = config.conquestBase || buildConquests(sources, targets, world, config);
@@ -753,7 +795,7 @@
         const functions = [parts, formatTime, minimumPop, fakeMinimumPop, population, offensivePopulation, minimumOff, meetsOff, canFake, attack, fakePacket, defense, offPacket,
             inNight, nextDaylight, daytimeIntervals, timing, counts, clamp, subtract, chooseArrival, bounds,
             allocate, compare, optimizeTimes, anchors, plan, capacityUpper, findCapacity, noblePacket, betterRank, scheduledRow, scheduleFixedBundle, scheduleBundle, buildConquests, planConquests];
-        return `'use strict';const OFF=${JSON.stringify(OFF)},FILL=${JSON.stringify(FILL)},DAY=${DAY},LIMIT=${LIMIT},timingCaches=new WeakMap();
+        return `'use strict';const OFF=${JSON.stringify(OFF)},FILL=${JSON.stringify(FILL)},NAMES=${JSON.stringify(NAMES)},DAY=${DAY},LIMIT=${LIMIT},timingCaches=new WeakMap();
             const formatter=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
             ${functions.map(fn => fn.toString()).join('\n')}
             onmessage=async({data})=>{try{const {sources,targets,world,config,total,operation}=data;
@@ -918,6 +960,7 @@
         $('[data-result-tools]').hidden = true;
         $('[data-results]').innerHTML = ''; $('[data-summary]').textContent = 'Einstellungen geändert. Kapazität neu berechnen.';
         $('[data-maximum]').textContent = '–'; $('[data-wb]').disabled = true;
+        $('[data-ag-diagnostics]').hidden = true; $('[data-ag-diagnostics-list]').replaceChildren();
     }
     function rawSettings() {
         return { targets: $('[data-targets]').value, fakePercent: +$('[data-ratio]').value, template: $('[data-template]').value, resultView: $('[data-result-view]').value,
@@ -1154,6 +1197,14 @@
         capacity = { ...estimated, config: { ...config, maxOffs: estimated.maxOffs, ...(estimated.conquestBase ? { conquestBase: estimated.conquestBase } : {}) }, sources: selected.map(s => ({ ...s, troops: { ...s.troops } })),
             targets: targets.map(t => ({ ...t })), time: stocksLoadedAt, reportInfo };
         $('[data-maximum]').textContent = `${estimated.maximum.toLocaleString('de-DE')} Angriffe · ${config.mode === 'ag' ? `${estimated.maxTrains} vollständige AG-Trains (${estimated.maxTrains * config.agPerTarget} AGs)` : `maximal ${estimated.maxOffs} Offs`}`;
+        const diagnostics = estimated.conquestBase?.diagnostics || [];
+        $('[data-ag-diagnostics]').hidden = !diagnostics.length;
+        $('[data-ag-diagnostics-title]').textContent = estimated.maxTrains ? 'Warum keine weiteren vollständigen AG-Trains?' : 'Warum ist kein vollständiger AG-Train möglich?';
+        $('[data-ag-diagnostics-list]').replaceChildren(...diagnostics.map(reason => {
+            const item = document.createElement('li'), coords = reason.targets.slice(0, 5);
+            item.textContent = reason.message + (coords.length ? ` Ziele: ${coords.join(', ')}${reason.targets.length > 5 ? ` und ${reason.targets.length - 5} weitere` : ''}.` : '');
+            return item;
+        }));
         $('[data-count]').min = String(Math.max(1, estimated.minAttacks || 1));
         $('[data-count]').max = String(Math.max(1, estimated.maximum));
         const essential = estimated.minAttacks || estimated.maxOffs;
@@ -1163,7 +1214,9 @@
         updateCounts(); renderSources(); await previewPlan();
         $('[data-summary]').textContent = `${reportInfo.fresh} aktuelle Berichte · ${reportInfo.missing} Ziele ohne aktuelle Daten${reportInfo.failed ? ` · ${reportInfo.failed} DB-Abfragen fehlgeschlagen (als unbekannt geplant)` : ''}. ${estimated.limited ? `Rechenlimit: ${LIMIT.toLocaleString('de-DE')} Angriffe. ` : ''}Kapazität unter diesen Einstellungen: ${estimated.maximum}.`;
         persist();
-        message(estimated.maximum ? 'Kapazität ermittelt. Angriffszahl wählen und Plan erstellen.' : 'Keine vollständige Planung für dieses Verhältnis und diese Zeitfenster möglich.', !estimated.maximum);
+        message(config.mode === 'ag' && !estimated.maxTrains
+            ? `Kein vollständiger AG-Train möglich. ${diagnostics[0]?.message || 'Bitte Einstellungen prüfen.'}${estimated.maximum ? ' Fakes können weiterhin geplant werden.' : ''}`
+            : estimated.maximum ? 'Kapazität ermittelt. Angriffszahl wählen und Plan erstellen.' : 'Keine vollständige Planung für dieses Verhältnis und diese Zeitfenster möglich.', !estimated.maximum || config.mode === 'ag' && !estimated.maxTrains);
     }
     function updateCounts() {
         const total = +$('[data-count]').value, ratio = +$('[data-ratio]').value;
@@ -1426,6 +1479,7 @@
         <div class="ds-export-tools"><button type="button" data-all-sources>Alle</button><button type="button" data-no-sources>Keine</button></div></div>
         <input data-source-search placeholder="Dorfname oder Koordinaten filtern" aria-label="Quelldörfer filtern"><div class="ds-sources" data-sources></div>
         <div class="ds-run"><button class="ds-primary" type="button" data-capacity disabled>2. Kapazität berechnen →</button><strong data-maximum>–</strong></div>
+        <div data-ag-diagnostics role="status" hidden><strong data-ag-diagnostics-title></strong><p class="ds-hint">Hindernisse bei den geprüften Kombinationen mit den verbleibenden Beständen:</p><ul data-ag-diagnostics-list></ul></div>
         <button type="button" data-cancel hidden>Berechnung abbrechen</button></div>
     <div class="ds-result-area"><div class="ds-result-heading"><h3>3. Angriffe planen</h3><button type="button" data-wb disabled>WB kopieren</button></div>
         <label>Angriffszahl <strong data-count-label></strong><input type="range" data-count min="1" max="1" value="1" disabled></label>

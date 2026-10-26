@@ -201,6 +201,13 @@ Bei fehlender Reichweite wird der AG-Modus nicht berechnet. Ein weltseitiges
 Verbot, Barbarendörfer zu adeln, wird berücksichtigt.
 
 Vor dem Erstellen zeigt die Kapazität die **vollständigen Trains und AG-Anzahl**.
+Sind keine vollständigen oder keine weiteren Trains möglich, erscheint darunter
+eine Begründung aus der tatsächlichen Planung: fehlende AGs, Reichweite,
+Quelldorfrollen, fehlende Cleaner oder Begleittruppen, Mindest-Einwohner,
+Berichtsstärke, Nachtbonus, Zeitfenster oder Abschickabstände. Soweit zuordenbar
+werden betroffene Zielkoordinaten angezeigt. Die Hinweise beschreiben die
+geprüften Kombinationen mit den verbleibenden Beständen. Auch wenn nur Fakes
+möglich sind, bleiben die AG-Hinweise sichtbar.
 Der Anzahl-Slider beginnt mindestens bei der Zahl der bereits reservierten
 Cleaner-/AG-Befehle; Erhöhen ergänzt Fakes. Auch ein hoher Fake-Wunschanteil
 verdrängt diese Pakete nicht. Ohne vollständige Pakete können verbleibende
