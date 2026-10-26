@@ -114,7 +114,7 @@ einen DS-Util / DS-Workbench-Importcode. Es schickt keine Angriffe ab.
    Beide Begrenzungen starten deaktiviert und lassen sich an den Plan anpassen.
 9. **2. Kapazität berechnen** verwendet die manuell geladene Bestandsaufnahme, liest
    Berichte und berechnet die unter diesen Einstellungen erreichbare Angriffszahl.
-   Dabei werden die Dorfbestände **nicht erneut automatisch abgefragt**. Nach fünf
+   Dabei werden die Dorfbestände **nicht erneut automatisch abgefragt**. Nach 20
    Minuten muss Schritt 1 erneut manuell ausgeführt werden.
    Angezeigt werden die erreichbare Gesamtzahl und die tatsächliche Off-Kapazität.
    Anschließend die gewünschte Anzahl per zweitem Slider wählen. Jede Änderung
@@ -183,6 +183,11 @@ Fehler. Nachtbonus und beide Zeitfenster gelten für jede einzelne Welle.
 Im AG-Modus umfasst eine eingegebene Endsekunde das Ende dieser Sekunde (`.999`),
 damit auch ein Ankunftsfenster aus genau einer Sekunde einen Train aufnehmen kann.
 Die maximale AG-Reichweite kommt aus `snob > max_dist` der Weltkonfiguration.
+Ob Millisekunden nutzbar sind, wird aus `commands > millis_arrival` gelesen und
+in den Welteinstellungen angezeigt. Der AG-Modus mit Millisekundenabständen ist
+nur bei ausdrücklich aktivierten Millisekunden verfügbar. Ist die Angabe
+deaktiviert, ungültig oder fehlt sie, erscheint beim Berechnen ein Hinweis;
+die normale Off-/Fake-Planung bleibt verfügbar.
 Bei fehlender Reichweite wird der AG-Modus nicht berechnet. Ein weltseitiges
 Verbot, Barbarendörfer zu adeln, wird berücksichtigt.
 
@@ -268,7 +273,7 @@ erhöhte Fake-Größe. Offs müssen weiterhin das eigentliche Weltlimit erfülle
 Für jeden geplanten Befehl werden Truppen vom gemeinsamen Dorfbestand abgezogen.
 Mehrere Befehle aus demselben Dorf verwenden unterschiedliche Truppen. Rückkehrende
 Einheiten und zukünftige Rekrutierungen werden nicht vorweggenommen. Eine
-Bestandsaufnahme wird nach fünf Minuten vor einer neuen Planung erneut verlangt.
+Bestandsaufnahme wird nach 20 Minuten vor einer neuen Planung erneut verlangt.
 
 ## Offs, Vorlagen und taktische Verteilung
 

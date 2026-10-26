@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.6.3
+// @version      1.6.4
 // @description  Plant Fakes und Offs aus eigenen Beständen mit DB-Info-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -23,7 +23,7 @@
     const NAMES = { spear: 'Speerträger', sword: 'Schwertkämpfer', axe: 'Axtkämpfer', archer: 'Bogenschütze',
         spy: 'Späher', light: 'Leichte Kavallerie', marcher: 'Berittener Bogenschütze', heavy: 'Schwere Kavallerie',
         ram: 'Rammbock', catapult: 'Katapult', knight: 'Paladin', snob: 'Adelsgeschlecht' };
-    const DAY = 86400000, LIMIT = 20000;
+    const DAY = 86400000, LIMIT = 20000, STOCK_MAX_AGE = 20 * 60000;
     const timingCaches = new WeakMap();
     const escape = value => String(value).replace(/[&<>"']/g, c =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -609,6 +609,9 @@
         return null;
     }
     function buildConquests(sources, targets, world, config) {
+        if (world.millisArrival !== true) throw new Error(world.millisArrival === false
+            ? 'Millisekunden sind auf dieser Welt deaktiviert. Der AG-Modus mit Millisekundenabständen ist hier nicht verfügbar.'
+            : 'Millisekunden-Einstellung fehlt in der Welteninfo. AG-Modus kann nicht berechnet werden.');
         const count = config.agPerTarget || 4, step = Math.max(1, Math.ceil(world.gap));
         if (!world.units.snob) throw new Error('Diese Welt hat keine Adelsgeschlechter.');
         if (!Number.isFinite(world.snobMaxDistance)) throw new Error('AG-Reichweite fehlt in der Weltkonfiguration.');
@@ -741,8 +744,10 @@
         }
         if (!units.ram && !units.catapult) throw new Error('Diese Welt hat keine unterstützten Belagerungseinheiten.');
         const gap = number(configDoc, 'commands > attack_gap');
+        const millisArrival = number(configDoc, 'commands > millis_arrival');
         const snobMaxDistance = number(configDoc, 'snob > max_dist');
         return { fakeLimit, night: { active: !!active, start, end }, units, gap: Number.isFinite(gap) ? Math.max(1, gap) : 200,
+            millisArrival: [0, 1].includes(millisArrival) ? millisArrival === 1 : null,
             snobMaxDistance: Number.isFinite(snobMaxDistance) && snobMaxDistance >= 0 ? snobMaxDistance : null,
             noBarbConquer: number(configDoc, 'snob > no_barb_conquer') === 1 };
     }
@@ -914,6 +919,9 @@
         if (Object.values(minimumOffUnits).some(n => !Number.isFinite(n) || n > 1000000)) throw new Error('Mindestmengen je Off-Einheit zwischen 0 und 1.000.000 wählen.');
         const agEscort = Object.fromEntries(Object.entries(raw.agEscort).map(([u, n]) => [u, amount(n)]));
         if (raw.mode === 'ag') {
+            if (world.millisArrival !== true) throw new Error(world.millisArrival === false
+                ? 'Millisekunden sind auf dieser Welt deaktiviert. Der AG-Modus mit Millisekundenabständen ist hier nicht verfügbar.'
+                : 'Millisekunden-Einstellung fehlt in der Welteninfo. AG-Modus kann nicht berechnet werden.');
             if (!world.units.snob || !Number.isFinite(world.snobMaxDistance)) throw new Error('AGs oder AG-Reichweite fehlen in der Weltkonfiguration.');
             if (!Number.isInteger(raw.agPerTarget) || raw.agPerTarget < 1 || raw.agPerTarget > 10) throw new Error('Zwischen 1 und 10 AG-Angriffe je Ziel wählen.');
             if (Object.values(agEscort).some(n => !Number.isFinite(n) || n > 1000000) || !(attack(agEscort, world) > 0)) throw new Error('Gültige offensive Begleittruppen je AG eingeben.');
@@ -1100,7 +1108,7 @@
     }
     async function calculateCapacity() {
         if (!stocksLoadedAt || !world || !map) throw new Error('Zuerst Schritt 1 „Bestände laden“ abschließen.');
-        if (now() - stocksLoadedAt > 300000) { stocksLoadedAt = 0; invalidate(); $('[data-load-state]').textContent = 'Bestände veraltet. Bitte Schritt 1 erneut ausführen.'; throw new Error('Bestände älter als fünf Minuten. Bitte „Bestände laden“ anklicken.'); }
+        if (now() - stocksLoadedAt >= STOCK_MAX_AGE) { stocksLoadedAt = 0; invalidate(); $('[data-load-state]').textContent = 'Bestände veraltet. Bitte Schritt 1 erneut ausführen.'; throw new Error('Bestände mindestens 20 Minuten alt. Bitte „Bestände laden“ anklicken.'); }
         const parsed = validateTargets();
         if (!parsed?.valid) throw new Error('Alle Zieleingaben müssen gültig sein. Ungültige Namen oder Koordinaten korrigieren.');
         if (!sources.some(s => s.selected)) throw new Error('Mindestens ein Quelldorf auswählen.');
@@ -1110,7 +1118,7 @@
         invalidate();
         const mine = generation;
         const reportInfo = await loadReports(config);
-        if (now() - stocksLoadedAt > 300000) { stocksLoadedAt = 0; $('[data-load-state]').textContent = 'Bestände veraltet. Bitte Schritt 1 erneut ausführen.'; throw new Error('Bestände inzwischen älter als fünf Minuten. Bitte „Bestände laden“ anklicken.'); }
+        if (now() - stocksLoadedAt >= STOCK_MAX_AGE) { stocksLoadedAt = 0; $('[data-load-state]').textContent = 'Bestände veraltet. Bitte Schritt 1 erneut ausführen.'; throw new Error('Bestände inzwischen mindestens 20 Minuten alt. Bitte „Bestände laden“ anklicken.'); }
         const selectedIds = new Set(sources.filter(s => s.selected).map(s => s.id));
         const selected = sources.filter(s => selectedIds.has(s.id));
         const estimated = await compute('capacity', selected, targets, config);
@@ -1146,7 +1154,7 @@
     }
     async function makePlan() {
         if (!capacity?.maximum) throw new Error('Zuerst Kapazität berechnen.');
-        if (now() - capacity.time > 300000) { invalidate(); throw new Error('Bestandsaufnahme älter als fünf Minuten. Kapazität neu berechnen.'); }
+        if (now() - capacity.time >= STOCK_MAX_AGE) { stocksLoadedAt = 0; invalidate(); $('[data-load-state]').textContent = 'Bestände veraltet. Bitte Schritt 1 erneut ausführen.'; throw new Error('Bestandsaufnahme mindestens 20 Minuten alt. Bitte „Bestände laden“ anklicken.'); }
         const total = +$('[data-count]').value;
         if (!Number.isInteger(total) || total < 1 || total > capacity.maximum) throw new Error('Angriffszahl liegt außerhalb der berechneten Kapazität.');
         const planned = preview;
@@ -1354,7 +1362,7 @@
     </style>
     <details class="ds-planner-toggle" data-planner-toggle><summary>Angriffsplaner<small data-request-badge hidden></small></summary>
     <div class="ds-body">
-        <section class="ds-load-step"><h3>1. Bestände laden</h3><p class="ds-hint">Fester erster Schritt: Welt und eigene Dorfbestände werden erst durch deinen Klick geladen. Die Planung verwendet anschließend diese Bestandsaufnahme.</p>
+        <section class="ds-load-step"><h3>1. Bestände laden</h3><p class="ds-hint">Fester erster Schritt: Welt und eigene Dorfbestände werden erst durch deinen Klick geladen. Die Planung verwendet diese Bestandsaufnahme für 20 Minuten.</p>
         <div class="ds-run"><button type="button" class="ds-primary" data-reload>Bestände laden</button><span class="ds-spinner" data-load-spinner role="status" aria-label="Wird geladen" hidden></span><button type="button" data-resume hidden disabled>Fortsetzen</button></div>
         <p data-load-state>Noch keine Bestände geladen.</p><p data-request-status role="status" aria-live="polite" hidden></p><p data-status role="status" aria-live="polite">Bitte zuerst „Bestände laden“ anklicken.</p></section></div>
         <fieldset data-planning-step disabled><div class="ds-body">
@@ -1490,7 +1498,7 @@
         resetWindows();
         map = parseMap(players, villages, allies);
         validateTargets();
-        $('[data-world]').textContent = `Welt ${gd.world} · Fakelimit ${world.fakeLimit} % der Quelldorfpunkte + 3 Einwohner Reserve · Fakes bevorzugt Katapulte + 1 Späher, ohne Speere · ${world.night.active ? `Nachtbonus ${world.night.start}:00–${world.night.end}:00` : 'Kein Nachtbonus'} · Laufzeiten aus der Weltkonfiguration.`;
+        $('[data-world]').textContent = `Welt ${gd.world} · Fakelimit ${world.fakeLimit} % der Quelldorfpunkte + 3 Einwohner Reserve · Fakes bevorzugt Katapulte + 1 Späher, ohne Speere · ${world.night.active ? `Nachtbonus ${world.night.start}:00–${world.night.end}:00` : 'Kein Nachtbonus'} · Millisekunden: ${world.millisArrival === true ? 'aktiviert' : world.millisArrival === false ? 'deaktiviert' : 'Angabe fehlt'} · Laufzeiten aus der Weltkonfiguration.`;
     }
     restoreSettings(); setBusy(false);
     const timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); abort.abort(); activeWorker?.terminate(); return; } tick(); }, 1000);
