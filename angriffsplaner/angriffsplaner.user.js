@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Die Stämme – Angriffsplaner
 // @namespace    local.die-staemme.angriffsplaner
-// @version      1.6.4
+// @version      1.6.6
 // @description  Plant Fakes und Offs aus eigenen Beständen mit DB-Info-Berichten, Zeitfenstern und Workbench-Export. Nutzung auf eigene Gefahr.
 // @match        https://*.die-staemme.de/game.php?*screen=place*
 // @exclude      /^[^?]+\?(?!(?=(?:[^#]*&)?screen=place(?:&|#|$))(?!(?:[^#]*&)?(?:try|action)(?:=|&|#|$))(?!(?:[^#]*&)?mode=(?!(?:command)?(?:&|#|$))[^&#]*(?:&|#|$)))/
@@ -576,12 +576,12 @@
         const info = timing(source, target, troops, world, config);
         return info ? { id: source.id, source: source.coords, sourceName: source.name, target, troops, type, ...info, ...extra } : null;
     }
-    function scheduleBundle(rows, calendar, world, config) {
-        // Gemeinsame Ankunftssekunde, Cleaner bei .000, AGs ab .001 mit weltseitigem Abschickabstand.
+    function scheduleFixedBundle(rows, calendar, world, config) {
+        // Mit Millisekunden eine gemeinsame Sekunde, sonst geordnete ganze Sekunden.
         const prepared = rows.map(r => ({ ...r, offset: r.offset || 0 }));
         for (let i = 0; i < prepared.length; i++) for (let j = 0; j < i; j++) {
             const a = prepared[i], b = prepared[j], noblePair = a.type === 'ag' && b.type === 'ag';
-            const gap = noblePair ? Math.max(1, Math.ceil(world.gap)) : config.gap;
+            const gap = noblePair ? (world.millisArrival === true ? Math.max(1, Math.ceil(world.gap)) : Math.max(1000, Math.ceil(world.gap / 1000) * 1000)) : config.gap;
             if (Math.abs((a.offset - a.duration) - (b.offset - b.duration)) < gap) return null;
         }
         const cleaner = prepared.find(r => r.cleaner), nobles = prepared.filter(r => r.type === 'ag');
@@ -608,14 +608,42 @@
         }
         return null;
     }
+    function scheduleBundle(rows, calendar, world, config) {
+        const together = scheduleFixedBundle(rows, calendar, world, config);
+        if (together || world.millisArrival === true) return together;
+        const cleaner = rows.find(r => r.cleaner), nobles = rows.filter(r => r.type === 'ag');
+        if (!cleaner || !nobles.length) return null;
+        // Freie Ankunftsintervalle enthalten auch die Abschickabstände zu bestehenden Paketen.
+        function freeIntervals(row) {
+            let intervals = row.intervals;
+            for (const old of calendar) {
+                const lo = old.launch - config.gap + row.duration, hi = old.launch + config.gap + row.duration;
+                intervals = intervals.flatMap(([a, b]) => b <= lo || a >= hi ? [[a, b]] :
+                    [[a, Math.min(b, lo)], [Math.max(a, hi), b]].filter(([x, y]) => x <= y));
+            }
+            return intervals;
+        }
+        let bases = [[config.arrivalStart, config.arrivalEnd]];
+        for (const row of nobles) bases = bases.flatMap(([a, b]) => freeIntervals(row)
+            .map(([lo, hi]) => [Math.max(a, lo - row.offset), Math.min(b, hi - row.offset)]).filter(([lo, hi]) => lo <= hi));
+        const minimumLead = Math.max(1000, ...nobles.map(r => Math.ceil((r.duration - cleaner.duration + config.gap - r.offset) / 1000) * 1000));
+        let best = null, bestLead = Infinity;
+        const cleanerIntervals = freeIntervals(cleaner);
+        for (const [lo, hi] of bases) for (const [cleanLo, cleanHi] of cleanerIntervals) {
+            const lead = Math.max(minimumLead, Math.ceil((lo - cleanHi) / 1000) * 1000);
+            const base = Math.ceil(Math.max(lo, cleanLo + lead) / 1000) * 1000;
+            if (base > hi || base - lead > cleanHi || lead > bestLead) continue;
+            const scheduled = scheduleFixedBundle(rows.map(r => r.cleaner ? { ...r, offset: -lead } : r), calendar, world, config);
+            if (scheduled && (lead < bestLead || !best || scheduled[0].arrival < best[0].arrival)) { best = scheduled; bestLead = lead; }
+        }
+        return best;
+    }
     function buildConquests(sources, targets, world, config) {
-        if (world.millisArrival !== true) throw new Error(world.millisArrival === false
-            ? 'Millisekunden sind auf dieser Welt deaktiviert. Der AG-Modus mit Millisekundenabständen ist hier nicht verfügbar.'
-            : 'Millisekunden-Einstellung fehlt in der Welteninfo. AG-Modus kann nicht berechnet werden.');
-        const count = config.agPerTarget || 4, step = Math.max(1, Math.ceil(world.gap));
+        const millis = world.millisArrival === true, first = millis ? 1 : 0;
+        const count = config.agPerTarget || 4, step = millis ? Math.max(1, Math.ceil(world.gap)) : Math.max(1000, Math.ceil(world.gap / 1000) * 1000);
         if (!world.units.snob) throw new Error('Diese Welt hat keine Adelsgeschlechter.');
         if (!Number.isFinite(world.snobMaxDistance)) throw new Error('AG-Reichweite fehlt in der Weltkonfiguration.');
-        if (1 + (count - 1) * step > 999) throw new Error('AG-Anzahl und weltseitiger Angriffsabstand passen nicht in eine Ankunftssekunde.');
+        if (millis && first + (count - 1) * step > 999) throw new Error('AG-Anzahl und weltseitiger Angriffsabstand passen nicht in eine Ankunftssekunde.');
         const stocks = sources.map(s => ({ ...s, troops: { ...s.troops } })), rows = [], usedCleaners = new Set(), captured = new Set();
         let trainCount = 0;
         while (rows.length + count + 1 <= LIMIT) {
@@ -642,12 +670,12 @@
                         while (waves.length < count) {
                             const packet = noblePacket(stock, donor, world, config);
                             if (!packet) break;
-                            const row = scheduledRow(donor, target, packet, 'ag', world, config, { bundle: target.id, wave: waves.length + 1, offset: 1 + waves.length * step });
+                            const row = scheduledRow(donor, target, packet, 'ag', world, config, { bundle: target.id, wave: waves.length + 1, offset: first + waves.length * step });
                             if (!row) break;
                             // Der Cleaner muss später langsamer sein als jeder AG-Befehl; hier offensichtliche Unmöglichkeiten auslassen.
                             const cleanFull = Object.fromEntries(OFF.filter(u => cleaner.troops[u] > 0).map(u => [u, cleaner.troops[u]]));
                             const cleanInfo = timing(cleaner, target, cleanFull, world, config);
-                            if (!cleanInfo || cleanInfo.duration - row.duration + row.offset < config.gap) break;
+                            if (!cleanInfo || millis && cleanInfo.duration - row.duration + row.offset < config.gap) break;
                             subtract(stock, packet); waves.push(row);
                         }
                         if (waves.length === count) break;
@@ -677,7 +705,10 @@
                     const afterCleaner = { ...cleaner.troops }; subtract(afterCleaner, packet); trial.set(cleaner.id, afterCleaner);
                     const remainingAGs = stocks.reduce((sum, s) => sum + (s.role === 'fake' ? 0 : (trial.get(s.id) || s.troops).snob || 0), 0);
                     const remainingCleaners = stocks.filter(s => s.role !== 'fake' && s.id !== cleaner.id && !usedCleaners.has(s.id) && meetsOff(trial.get(s.id) || s.troops, world, config)).length;
-                    const rank = [Math.min(Math.floor(remainingAGs / count), remainingCleaners), -availableAGs, target.report?.priority || 0, -scheduled[0].arrival];
+                    const firstArrival = scheduled.find(r => r.type === 'ag').arrival;
+                    const sameSecond = Math.floor(scheduled[0].arrival / 1000) === Math.floor(firstArrival / 1000);
+                    const rank = [sameSecond ? 1 : 0, millis ? 0 : scheduled[0].arrival - firstArrival,
+                        Math.min(Math.floor(remainingAGs / count), remainingCleaners), -availableAGs, target.report?.priority || 0, -scheduled[0].arrival];
                     if (betterRank(rank, best)) best = { scheduled, trial, cleaner, target, rank };
                 }
             }
@@ -721,7 +752,7 @@
     function workerSource() {
         const functions = [parts, formatTime, minimumPop, fakeMinimumPop, population, offensivePopulation, minimumOff, meetsOff, canFake, attack, fakePacket, defense, offPacket,
             inNight, nextDaylight, daytimeIntervals, timing, counts, clamp, subtract, chooseArrival, bounds,
-            allocate, compare, optimizeTimes, anchors, plan, capacityUpper, findCapacity, noblePacket, betterRank, scheduledRow, scheduleBundle, buildConquests, planConquests];
+            allocate, compare, optimizeTimes, anchors, plan, capacityUpper, findCapacity, noblePacket, betterRank, scheduledRow, scheduleFixedBundle, scheduleBundle, buildConquests, planConquests];
         return `'use strict';const OFF=${JSON.stringify(OFF)},FILL=${JSON.stringify(FILL)},DAY=${DAY},LIMIT=${LIMIT},timingCaches=new WeakMap();
             const formatter=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
             ${functions.map(fn => fn.toString()).join('\n')}
@@ -919,15 +950,12 @@
         if (Object.values(minimumOffUnits).some(n => !Number.isFinite(n) || n > 1000000)) throw new Error('Mindestmengen je Off-Einheit zwischen 0 und 1.000.000 wählen.');
         const agEscort = Object.fromEntries(Object.entries(raw.agEscort).map(([u, n]) => [u, amount(n)]));
         if (raw.mode === 'ag') {
-            if (world.millisArrival !== true) throw new Error(world.millisArrival === false
-                ? 'Millisekunden sind auf dieser Welt deaktiviert. Der AG-Modus mit Millisekundenabständen ist hier nicht verfügbar.'
-                : 'Millisekunden-Einstellung fehlt in der Welteninfo. AG-Modus kann nicht berechnet werden.');
             if (!world.units.snob || !Number.isFinite(world.snobMaxDistance)) throw new Error('AGs oder AG-Reichweite fehlen in der Weltkonfiguration.');
             if (!Number.isInteger(raw.agPerTarget) || raw.agPerTarget < 1 || raw.agPerTarget > 10) throw new Error('Zwischen 1 und 10 AG-Angriffe je Ziel wählen.');
             if (Object.values(agEscort).some(n => !Number.isFinite(n) || n > 1000000) || !(attack(agEscort, world) > 0)) throw new Error('Gültige offensive Begleittruppen je AG eingeben.');
-            if (1 + (raw.agPerTarget - 1) * Math.max(1, Math.ceil(world.gap)) > 999) throw new Error('So viele AG-Angriffe passen beim weltseitigen Abstand nicht in eine Sekunde.');
+            if (world.millisArrival === true && 1 + (raw.agPerTarget - 1) * Math.max(1, Math.ceil(world.gap)) > 999) throw new Error('So viele AG-Angriffe passen beim weltseitigen Abstand nicht in eine Sekunde.');
         }
-        const endPadding = raw.mode === 'ag' ? 999 : 0;
+        const endPadding = raw.mode === 'ag' && world.millisArrival === true ? 999 : 0;
         const sendStart = raw.useSend ? Math.max(t, parseTime(raw.sendStart)) : t,
             sendEnd = raw.useSend ? parseTime(raw.sendEnd) + endPadding : t + 30 * DAY,
             arrivalStart = raw.useArrival ? parseTime(raw.arrivalStart) : t,
@@ -1034,7 +1062,7 @@
         message(`DB-Info-Verbindung erfolgreich (HTTP 200) · ${destination.coords}${report ? ' · aktueller Bericht verfügbar.' : ' · kein aktueller vollständiger Bericht verfügbar.'}`);
     }
     function span(ms) { const s = Math.ceil(ms / 1000); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }
-    function planTime(time) { return formatTime(time) + (capacity?.config.mode === 'ag' ? `.${String(time % 1000).padStart(3, '0')}` : ''); }
+    function planTime(time) { return formatTime(time) + (capacity?.config.mode === 'ag' && world?.millisArrival === true ? `.${String(time % 1000).padStart(3, '0')}` : ''); }
     function activeRows(time) {
         const expired = new Set(result.rows.filter(r => r.bundle != null && r.launch <= time).map(r => r.bundle));
         return result.rows.filter(r => r.launch > time && (r.bundle == null || !expired.has(r.bundle)));
@@ -1370,7 +1398,7 @@
         <div data-ag-options hidden>
         <div class="ds-fields"><label>AG-Angriffe je Ziel<input type="number" data-ag-count min="1" max="10" value="4"></label><p class="ds-hint">Je AG-Angriff genau 1 Adelsgeschlecht. Ein Paket enthält 1 große Cleaner-Off und einen vollständigen Train. AGs können aus mehreren eigenen Dörfern stammen.</p></div>
         <p><strong>Begleittruppen pro einzelnem AG-Angriff</strong></p><div class="ds-fields">${OFF.filter(u => units.includes(u)).map(u => `<label>${NAMES[u]}<input type="number" data-ag-escort="${u}" min="0" max="1000000" value="${u === 'axe' ? 100 : 0}"></label>`).join('')}</div>
-        <p class="ds-hint">Cleaner und alle AGs werden auf dieselbe Ankunftssekunde geplant; der Cleaner wird vorher abgeschickt und trifft zuerst ein. Dafür braucht der Cleaner eine längere Laufzeit als die AGs. Die Mindest-Off-Mengen gelten für den Cleaner, die Begleitmengen getrennt für jeden AG-Angriff.</p>
+        <p class="ds-hint">Mit Millisekunden werden Cleaner und AGs auf dieselbe Ankunftssekunde geplant. Ohne Millisekunden kommt der Cleaner bevorzugt in derselben Sekunde wie das erste AG an, andernfalls so knapp wie möglich davor. Weitere AGs folgen in ganzen Sekunden mit weltseitigem Mindestabstand. Der Cleaner wird immer vorher abgeschickt. Die Mindest-Off-Mengen gelten für den Cleaner, die Begleitmengen getrennt für jeden AG-Angriff.</p>
         <p class="ds-hint">Innerhalb eines AG-Trains gilt der weltseitige Angriffsabstand statt des globalen Sekundenabstands. Pakete werden nur gemeinsam ausgewählt und exportiert. Abschicken erfolgt manuell über das Spiel bzw. deinen WB-Ablauf; das Skript verschickt keine Befehle. Vier AGs garantieren keine Eroberung. Gemeinsame Sekunden und Fakes garantieren keine Snipe-Sicherheit; AG-Laufzeiten können erkennbar bleiben.</p>
         <p class="ds-hint">Zuerst möglichst viele vollständige Eroberungspakete, danach Fakes aus Restbeständen. Der Anzahl-Slider unterschreitet die reservierten Pakete nicht; der Fake-Prozentsatz verdrängt im AG-Modus keine AGs.</p>
         </div>
@@ -1498,7 +1526,7 @@
         resetWindows();
         map = parseMap(players, villages, allies);
         validateTargets();
-        $('[data-world]').textContent = `Welt ${gd.world} · Fakelimit ${world.fakeLimit} % der Quelldorfpunkte + 3 Einwohner Reserve · Fakes bevorzugt Katapulte + 1 Späher, ohne Speere · ${world.night.active ? `Nachtbonus ${world.night.start}:00–${world.night.end}:00` : 'Kein Nachtbonus'} · Millisekunden: ${world.millisArrival === true ? 'aktiviert' : world.millisArrival === false ? 'deaktiviert' : 'Angabe fehlt'} · Laufzeiten aus der Weltkonfiguration.`;
+        $('[data-world]').textContent = `Welt ${gd.world} · Fakelimit ${world.fakeLimit} % der Quelldorfpunkte + 3 Einwohner Reserve · Fakes bevorzugt Katapulte + 1 Späher, ohne Speere · ${world.night.active ? `Nachtbonus ${world.night.start}:00–${world.night.end}:00` : 'Kein Nachtbonus'} · Millisekunden: ${world.millisArrival === true ? 'aktiviert' : world.millisArrival === false ? 'deaktiviert – Planung in ganzen Sekunden' : 'Angabe fehlt – Planung in ganzen Sekunden'} · Laufzeiten aus der Weltkonfiguration.`;
     }
     restoreSettings(); setBusy(false);
     const timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); abort.abort(); activeWorker?.terminate(); return; } tick(); }, 1000);

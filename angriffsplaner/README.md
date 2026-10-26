@@ -167,27 +167,36 @@ Der Planer sucht möglichst viele **vollständige Eroberungspakete**:
    ein Späher, mindestens Weltlimit + 3 Einwohner. Echte AGs werden nicht in
    Fake-Befehlen verbraucht.
 
-**Cleaner und alle AGs erhalten dieselbe Ankunftssekunde.** Der Cleaner liegt im
+**Bei aktivierten Millisekunden erhalten Cleaner und alle AGs dieselbe Ankunftssekunde.** Der Cleaner liegt im
 Plan bei `.000`, die AG-Wellen ab `.001` mit dem weltseitigen Angriffsabstand.
 Bei 200 ms sind dies `.001`, `.201`, `.401` und `.601`. Der Cleaner muss zugleich
 mindestens den globalen Abschickabstand vor jeder AG-Welle starten. Deshalb muss
-seine Laufzeit länger sein; eine Cleaner-Off und ein langsamerer AG aus demselben
+bei dieser Bündelung seine Laufzeit länger sein; eine Cleaner-Off und ein langsamerer AG aus demselben
 Dorf erfüllen diese Vorgabe nicht. Unpassende Kombinationen werden ausgelassen.
 Zu enge Abschickfenster können trotz ausreichender Truppen alle Pakete verhindern.
 
 Der globale Abschickabstand gilt zwischen unabhängigen Paketen, Fakes sowie
 Cleaner und AGs. **Innerhalb desselben AG-Trains** gilt der weltseitige Abstand;
 sonst könnten mehrere AGs aus demselben Dorf nicht in derselben Sekunde ankommen.
-Passt die gewählte AG-Anzahl damit nicht in eine Sekunde, zeigt das Skript einen
+Passt die gewählte AG-Anzahl bei aktiven Millisekunden nicht in eine Sekunde, zeigt das Skript einen
 Fehler. Nachtbonus und beide Zeitfenster gelten für jede einzelne Welle.
-Im AG-Modus umfasst eine eingegebene Endsekunde das Ende dieser Sekunde (`.999`),
+Im AG-Modus mit Millisekunden umfasst eine eingegebene Endsekunde das Ende dieser Sekunde (`.999`),
 damit auch ein Ankunftsfenster aus genau einer Sekunde einen Train aufnehmen kann.
 Die maximale AG-Reichweite kommt aus `snob > max_dist` der Weltkonfiguration.
 Ob Millisekunden nutzbar sind, wird aus `commands > millis_arrival` gelesen und
-in den Welteinstellungen angezeigt. Der AG-Modus mit Millisekundenabständen ist
-nur bei ausdrücklich aktivierten Millisekunden verfügbar. Ist die Angabe
-deaktiviert, ungültig oder fehlt sie, erscheint beim Berechnen ein Hinweis;
-die normale Off-/Fake-Planung bleibt verfügbar.
+in den Welteinstellungen angezeigt. Sind Millisekunden deaktiviert oder fehlt eine
+gültige Angabe, bleibt der AG-Modus verfügbar und rechnet mit **ganzen Sekunden**:
+Cleaner bevorzugt in derselben Ankunftssekunde wie das erste AG, sofern er vorher
+abgeschickt werden kann. Unter den möglichen Cleanern wird diese Variante
+bevorzugt. Ist das nicht möglich, kommt der Cleaner so knapp wie möglich vorher an.
+Weitere AGs folgen mit dem auf ganze
+Sekunden aufgerundeten weltseitigen Mindestabstand (mindestens eine Sekunde).
+Bei 200 ms Weltabstand liegen die vier AGs bei +0, +1, +2 und +3 Sekunden relativ
+zum ersten AG; ein passender Cleaner liegt ebenfalls bei +0.
+Anzeige und WB-Export verwenden dabei ganze Sekunden; die Endsekunde eines
+Zeitfensters erhält keinen Millisekundenzuschlag. Auch im Sekundenmodus muss der
+Cleaner vor allen AGs abgeschickt werden; alle Zeitfenster und Nachtgrenzen gelten
+für das vollständige Paket.
 Bei fehlender Reichweite wird der AG-Modus nicht berechnet. Ein weltseitiges
 Verbot, Barbarendörfer zu adeln, wird berücksichtigt.
 
